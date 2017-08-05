@@ -1,0 +1,3 @@
+#!/bin/bash
+
+xcowsay `upower -i $(upower -e | grep 'BAT') | grep -E "state|to full|percentage|time to empty"`

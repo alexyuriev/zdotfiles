@@ -1,0 +1,185 @@
+#!/usr/bin/perl
+
+# aws-create-ec2-sec-groups
+#
+# Creates AWS EC2 security group
+# Requires configured aws tool
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long;
+use FileHandle;
+use JSON;
+use Data::Dumper;
+
+use constant ERR_EC2_MALFORMATTED_RESERVATIONS => qq(AWS EC2 instance list for region %s returned an incorrect JSON: Reservations[] field is missing or is not an array);
+use constant ERR_EC2_MALFORMATTED_INSTANCES    => qq(AWS EC2 instance list for region %s returned an incorrect JSON: Instance field for Reservation %s is missing or is not an array);
+
+{
+
+  my $opt = {
+                'TOOL_NAME'       => qq(aws-create-ec2-sec-group),
+                'TOOL_DESC'       => qq(Creates an AWS EC2 security group),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 1,
+                'description'     => undef,
+                'group_name'      => undef,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  my $ret = GetOptions(   "group-name=s"  => \$opt->{'group_name'},
+                          "description=s" => \$opt->{'description'},
+                          "help"          => \$opt->{'help'}
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+  display_and_exit(-1, qq(Must provide a security group name)) if (isEmpty($opt->{'group_name'}));
+  display_and_exit(-1, qq(Must provide a description)) if (isEmpty($opt->{'description'}));
+
+  my $response_ptr = undef;
+  ($ret, $response_ptr) = readFile("aws-list-ec2-sec-groups|");
+  display_and_exit(-1, qq(Failed to get crunched security groups from aws: ) . $response_ptr) if (!$ret);
+
+  my $sec_groups_list = undef;
+  ($ret, $sec_groups_list) = fromJSON($$response_ptr);
+  display_and_exit(-1, qq(AWS security groups do not appear to be a JSON: $sec_groups_list)) if (!$ret);
+
+  foreach my $this_sec_group (@$sec_groups_list)
+    {
+      next if (isEmpty($this_sec_group->{'GroupName'}));
+      next if ($this_sec_group->{'GroupName'} ne $opt->{'group_name'});
+
+      display_and_exit(-1, qq(Security group ) . $opt->{'group_name'} . qq( alraedy exists));
+    }
+
+  my $cmd = sprintf("aws ec2 create-security-group --group-name %s --description %s|", $opt->{'group_name'}, $opt->{'description'});
+  ($ret, $response_ptr) = readFile($cmd);
+  display_and_exit(-1, qq(Failed to create a security group ) . $opt->{'group_name'} . qq(:) . $response_ptr) if (!$ret);
+
+  my $response = undef;
+  ($ret, $response) = fromJSON($$response_ptr);
+  display_and_exit(-1, qq(Response of create security group command does not seem to be a JSON: ) . $response) if (!$ret);
+  display_and_exit(-1, qq(Response of create security group command did not return a group id)) if (isEmpty($response->{'GroupId'}));
+  print $$response_ptr;
+
+  exit(0);
+}
+
+exit(0);
+
+sub readFile
+{
+  my $fname = shift @_;
+  my $txt = '';
+  my $ret = 0;
+
+  my $fh = FileHandle->new($fname);
+  if (defined $fh)
+    {
+      while (my $line = <$fh>) { $txt .= $line; }
+      $fh->close();
+      $ret = 1;
+    }
+  return ($ret, \$txt);
+}
+
+sub isEmpty
+{
+  my $a = shift @_;
+  my $r = 0;
+
+  return 1 if (!defined $a);
+  $r = 1 if (($a eq "") || ($a =~ m/^\s+$/g));
+
+  return $r;
+}
+
+sub fromJSON
+{
+  my $txt = shift @_;
+
+  return (0, qq(Received an undef)) if (isEmpty($txt));
+  my $json = JSON->new->utf8->allow_nonref;
+
+  my $ptr = undef;
+  eval { $ptr = $json->decode($txt); };
+  return (0, $@) if ($@);
+  return (1, $ptr);
+}
+
+sub toJSON
+{
+  my $ptr = shift @_;
+  my $is_pretty = shift @_;
+
+  return (0, qq(Received an undef)) if (!defined $ptr);
+
+  my $json = JSON->new->utf8->allow_nonref;
+  return (1, $json->pretty(1)->encode($ptr)) if ($is_pretty);
+  return (1, $json->encode($ptr));
+}
+
+sub removeSpaces
+{
+  my $txt = shift @_;
+  return '' if (isEmpty($txt));
+
+  $txt =~ s/\s+//g;
+
+  return $txt;
+}
+
+sub display_and_exit
+{
+  my $code = shift @_;
+  my $msg = shift @_;
+
+  $msg = '' if (isEmpty($msg));
+  $code = -1 if (isEmpty($code));
+
+  printf "$msg\n";
+  exit($code);
+}
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --group-name=<name>   Create security group <name>\n");
+  printf("      --description=<desc>  Description of the AWS security group\n");
+  printf("      --help                This help\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(0);
+
+}

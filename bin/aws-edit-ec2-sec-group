@@ -1,0 +1,273 @@
+#!/usr/bin/perl
+
+# aws-edit-ec2-sec-group
+#
+# Edits AWS EC2 security group
+# Requires configured aws tool
+#
+# Version 0.0.2
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use FileHandle;
+use JSON;
+
+use constant ERR_MSG_MISSING_SECGRPID_AND_NAME => qq(Must provide a security group name or security group id);
+use constant ERR_MSG_CANTMIX_SECGRPID_AND_NAME => qq(Cannot mix security group name and security group id);
+use constant ERR_MSG_INVALID_COMMAND           => qq(Must provide a valid management command);
+use constant ERR_MSG_INVALID_PROTOCOL          => qq(Must provide a valid IP protocol);
+use constant ERR_MSG_INVALID_PORT_NUMBER       => qq(Must provide a valid port number);
+use constant ERR_MSG_INVALID_IPV4_CIDR         => qq(Must provide a valid IPv4 CIDR);
+use constant ERR_MSG_EC2_SECGROUP_MUST_EXIST   => qq(Security group %s must already exist);
+use constant ERR_MSG_EC2_NO_SEC_GROUP_DATA     => qq(Failed to get crunched security group data from AWS: );
+use constant ERR_MSG_EC2_SEC_DATA_NOT_JSON     => qq(AWS security group data does not appear to be JSON: );
+use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy allow connections to port %s protocol %s from %s to security group %s);
+
+{
+
+  my $opt = {
+                'TOOL_NAME'       => qq(aws-edit-ec2-sec-groups),
+                'TOOL_DESC'       => qq(Manipulate a single rule in an existing AWS EC2 security group),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 2,
+                'command'         => undef,
+                'group_name'      => undef,
+                'group_id'        => undef,
+                'protocol'        => undef,
+                'port'            => undef,
+                'cidr'            => undef,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  my $ret = GetOptions(   "group-name=s"  => \$opt->{'group_name'},
+                          "group-id=s"    => \$opt->{'group_id'},
+                          "command=s"     => \$opt->{'command'},
+                          "protocol=s"    => \$opt->{'protocol'},
+                          "port=s"        => \$opt->{'port'},
+                          "cidr=s"        => \$opt->{'cidr'},
+                          "help"          => \$opt->{'help'}
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+  display_and_exit(-1, ERR_MSG_MISSING_SECGRPID_AND_NAME) if (isEmpty($opt->{'group_name'}) && isEmpty($opt->{'group_id'}));
+  display_and_exit(-1, ERR_MSG_CANTMIX_SECGRPID_AND_NAME) if (!isEmpty($opt->{'group_name'}) && !isEmpty($opt->{'group_id'}));
+  if ($opt->{'group_name'}) { $opt->{'group_txt'} = $opt->{'group_txt'}; } else { $opt->{'group_txt'} = $opt->{'group_id'}; }
+
+  display_and_exit(-1, ERR_MSG_INVALID_COMMAND)     if (!isValidCommand($opt->{'command'}));
+  display_and_exit(-1, ERR_MSG_INVALID_PROTOCOL)    if (!isValidIpProtocol($opt->{'protocol'}));
+  display_and_exit(-1, ERR_MSG_INVALID_PORT_NUMBER) if (!isValidPortNumber($opt->{'port'}));
+  display_and_exit(-1, ERR_MSG_INVALID_IPV4_CIDR)   if (!isValidIpv4CIDR($opt->{'cidr'}));
+
+  my $response_ptr = undef;
+  ($ret, $response_ptr) = readFile("aws-list-ec2-sec-groups|");
+  display_and_exit(-1, ERR_MSG_EC2_NO_SEC_GROUP_DATA . $response_ptr) if (!$ret);
+
+  my $sec_groups_list = undef;
+  ($ret, $sec_groups_list) = fromJSON($$response_ptr);
+  display_and_exit(-1, ERR_MSG_EC2_SEC_DATA_NOT_JSON . $sec_groups_list) if (!$ret);
+
+  my $found = 0;
+
+  foreach my $this_sec_group (@$sec_groups_list)
+    {
+      next if (isEmpty($this_sec_group->{'GroupName'}) && isEmpty($this_sec_group->{'GroupId'}));
+      next if (!isEmpty($opt->{'group_name'}) && $opt->{'group_name'} ne $this_sec_group->{'GroupName'});
+      next if (!isEmpty($opt->{'group_id'})   && $opt->{'group_id'}   ne $this_sec_group->{'GroupId'});
+
+      $opt->{'group_id'} = $this_sec_group->{'GroupId'} if (isEmpty($opt->{'group_id'}));
+      $found = 1;
+      last;
+    }
+  display_and_exit(-1, sprintf(ERR_MSG_EC2_SECGROUP_MUST_EXIST, $opt->{'group_txt'})) if (!$found);
+
+  my $cmd = undef;
+  my $mode_str = qq(authorize-security-group-ingress); $mode_str = qq(revoke-security-group-ingress) if ($opt->{'command'} eq qq(remove));
+  $cmd = sprintf("aws ec2 %s --group-id %s --protocol %s --port %s --cidr %s", $mode_str, $opt->{'group_id'}, $opt->{'protocol'}, $opt->{'port'}, $opt->{'cidr'});
+
+  $ret = system($cmd);
+  display_and_exit(-1, sprintf(ERR_MSG_POLICY_CHANGE_FAILED, $mode_str, $opt->{'port'}, $opt->{'protocol'}, $opt->{'cidr'}, $opt->{'group_id'})) if ($ret != 0);
+
+  exit(0);
+}
+
+exit(0);
+
+sub readFile
+{
+  my $fname = shift @_;
+  my $txt = '';
+  my $ret = 0;
+
+  my $fh = FileHandle->new($fname);
+  if (defined $fh)
+    {
+      while (my $line = <$fh>) { $txt .= $line; }
+      $fh->close();
+      $ret = 1;
+    }
+  return ($ret, \$txt);
+}
+
+sub isEmpty
+{
+  my $a = shift @_;
+  my $r = 0;
+
+  return 1 if (!defined $a);
+  $r = 1 if (($a eq "") || ($a =~ m/^\s+$/g));
+
+  return $r;
+}
+
+sub fromJSON
+{
+  my $txt = shift @_;
+
+  return (0, qq(Received an undef)) if (isEmpty($txt));
+  my $json = JSON->new->utf8->allow_nonref;
+
+  my $ptr = undef;
+  eval { $ptr = $json->decode($txt); };
+  return (0, $@) if ($@);
+  return (1, $ptr);
+}
+
+sub toJSON
+{
+  my $ptr = shift @_;
+  my $is_pretty = shift @_;
+
+  return (0, qq(Received an undef)) if (!defined $ptr);
+
+  my $json = JSON->new->utf8->allow_nonref;
+  return (1, $json->pretty(1)->encode($ptr)) if ($is_pretty);
+  return (1, $json->encode($ptr));
+}
+
+sub removeSpaces
+{
+  my $txt = shift @_;
+  return '' if (isEmpty($txt));
+
+  $txt =~ s/\s+//g;
+
+  return $txt;
+}
+
+sub display_and_exit
+{
+  my $code = shift @_;
+  my $msg = shift @_;
+
+  $msg = '' if (isEmpty($msg));
+  $code = -1 if (isEmpty($code));
+
+  printf "$msg\n";
+  exit($code);
+}
+
+sub isValidIpProtocol {
+  my $prot = shift @_;
+
+  return 0 if (isEmpty($prot));
+  return 0 unless ($prot =~ m/^(tcp|udp)$/g);
+  return 1;
+}
+
+sub isValidIpv4CIDR
+{
+  my $cidr = shift @_;
+
+  return 0 if (isEmpty($cidr));
+  my ($oct1, $oct2, $oct3, $oct4_extra, $junk) = split('\.', $cidr, 4);
+  return 0 if (!isEmpty($junk));
+
+  my ($oct4, $net) = split('/', $oct4_extra);
+  foreach my $oct ($oct1, $oct2, $oct3, $oct4)
+    {
+      return 0 if (!isUnsignedInteger($oct));
+      return 0 if ($oct > 255);
+    }
+  return 0 if (!isUnsignedInteger($net));
+  return 0 if ($net > 32);
+  return 1;
+
+}
+
+sub isUnsignedInteger
+{
+  my $a = shift @_;
+
+  my $r = 0;
+  if (!isEmpty($a))
+    {
+      $r = 1 if ( $a =~ /^\d+$/g);
+    }
+  return $r;
+}
+
+sub isValidPortNumber
+{
+  my $port = shift @_;
+
+  return 0 if (!isUnsignedInteger($port));
+  return 0 if ($port > 65534);
+  return 1;
+}
+
+sub isValidCommand
+{
+  my $cmd = shift @_;
+
+  return 0 if (isEmpty($cmd));
+  return 0 unless ($cmd =~ m/^(add|remove)$/);
+  return 1;
+}
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --group-id=<id>        Manipulate security group with id  <id>\n");
+  printf("      --group-name=<name>    Manipulate security group with name <name>\n");
+  printf("      --command=<command>    <command> to execute on a security group\n");
+  printf("                             'add' -    adds a new rule\n");
+  printf("                             'remove' - removes an existing rule\n");
+  printf("      --protocol=<prot>      Protocol for allow security rule: 'tcp'/'udp'");
+  printf("      --port=<port>          Destination port number for the allow rule");
+  printf("      --cidr=<cidr>          Source IPv4 CIDR allowed to connect from\n");
+  printf("      --help                 This help\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(0);
+
+}

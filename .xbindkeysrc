@@ -1,0 +1,8 @@
+# xbindkeys configuration
+# 
+# Alexander Yuriev <alex@corp.zubrcom.net>
+
+# let's use the Menu as the middle button because laptop's trackpads suck
+
+"xte 'mouseclick 2'"
+  Menu

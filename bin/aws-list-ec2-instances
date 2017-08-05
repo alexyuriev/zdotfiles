@@ -1,0 +1,221 @@
+#!/usr/bin/perl
+
+# aws-list-ec2-instances
+#
+# Extract useful information from aws ec2 describe instances
+# Requires configured aws tool
+#
+# Version 0.0.8
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use FileHandle;
+use JSON;
+
+use Helpers::Misc;
+
+use constant ERR_MSG_ARGUMENT_CONFLICT         => qq(Command arguments --instance-id and --hostname cannot be combined. Use only one);
+use constant ERR_MSG_NO_REGIONS                => qq(Can't get a list of known AWS EC2 regions: %s);
+use constant ERR_MSG_UNKNOWN_REGION            => qq(Unknown AWS EC2 region %s);
+use constant ERR_EC2_NO_REGIONS                => qq(Failed to fetch a list of AWS EC2 regions);
+use constant ERR_EC2_MALFORMATTED_REGIONS      => qq(AWS EC2 regions endpoint returned invalid JSON: %s);
+use constant ERR_EC2_MALFORMATTED_JSON         => qq(AWS EC2 instance list for region %s does not appear to be JSON: %s);
+use constant ERR_EC2_NO_INSTANCES_IN_REGION    => qq(Failed to list instances in AWS EC2 region %s: %s);
+use constant ERR_EC2_MALFORMATTED_RESERVATIONS => qq(AWS EC2 instance list for region %s returned an incorrect JSON: Reservations[] field is missing or is not an array);
+use constant ERR_EC2_MALFORMATTED_INSTANCES    => qq(AWS EC2 instance list for region %s returned an incorrect JSON: Instance field for Reservation %s is missing or is not an array);
+{
+
+  my $opt = {
+                'TOOL_NAME'       => qq(aws-list-ec2-instances),
+                'TOOL_DESC'       => qq(Lists AWS EC2 instances),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 8,
+                'regions'         => undef,
+                'instance_id'     => undef,
+                'hostname'        => undef,
+                'with_tags'       => 0,
+                'single_instance' => 0,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  my $ret = GetOptions(   "with-tags"     => \$opt->{'with_tags'},
+                          "regions=s"     => \$opt->{'regions'},
+                          "instance-id=s" => \$opt->{'instance_id'},
+                          "hostname=s"    => \$opt->{'hostname'},
+                          "help"          => \$opt->{'help'}
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_ARGUMENT_CONFLICT) if (!Helpers::Misc::isEmpty($opt->{'instance_id'}) && !Helpers::Misc::isEmpty($opt->{'hostname'}));
+  $opt->{'single_instance'} = 1 if (!Helpers::Misc::isEmpty($opt->{'instance_id'}) || !Helpers::Misc::isEmpty($opt->{'hostname'}));
+
+  my $known_regions = undef;
+  ($ret, $known_regions) = aws_ec2_get_regions();
+  Helpers::Misc::display_and_exit(-1, sprintf(ERR_MSG_NO_REGIONS, $known_regions)) if (!$ret);
+  $opt->{'regions'} = join(',', keys %$known_regions) if (Helpers::Misc::isEmpty($opt->{'regions'}));
+
+  $opt->{'regions'} = Helpers::Misc::removeSpaces($opt->{'regions'});
+  my @regions = split(',', $opt->{'regions'});
+  foreach my $this_region (@regions)
+    {
+      Helpers::Misc::display_and_exit(-1, sprintf(ERR_MSG_UNKNOWN_REGION, $this_region)) if (!defined $known_regions->{$this_region});
+    }
+
+  my @all_instances = ();
+
+  foreach my $this_region (@regions)
+    {
+      my $region_list_ptr = undef;
+      ($ret, $region_list_ptr) = Helpers::Misc::readFile("aws ec2 describe-instances --region $this_region|");
+      Helpers::Misc::display_and_exit(-1, sprintf(ERR_EC2_NO_INSTANCES_IN_REGION, $this_region, $region_list_ptr)) if (!$ret);
+
+      my $reg_instance_data = undef;
+      ($ret, $reg_instance_data) = Helpers::Misc::fromJSON($$region_list_ptr);
+      Helpers::Misc::display_and_exit(-1, sprintf(ERR_EC2_MALFORMATTED_JSON, $this_region, $reg_instance_data)) if (!$ret);
+
+      if (Helpers::Misc::isEmpty($reg_instance_data->{'Reservations'}) || ref $reg_instance_data->{'Reservations'} ne qq(ARRAY))
+        {
+          Helpers::Misc::display_and_exit(-1, sprintf(ERR_EC2_MALFORMATTED_RESERVATIONS, $this_region));
+        }
+
+      foreach my $this_reservation (@{$reg_instance_data->{'Reservations'}})
+        {
+          if (Helpers::Misc::isEmpty($this_reservation->{'Instances'}) || ref $this_reservation->{'Instances'} ne qq(ARRAY))
+            {
+              Helpers::Misc::display_and_exit(-1, sprintf(ERR_EC2_MALFORMATTED_INSTANCES, $this_region, $this_reservation->{'ReservationId'}));
+            }
+          foreach my $this_instance (@{$this_reservation->{'Instances'}})
+            {
+              # we have to do tags first because in AWS land server name is actually a tag
+
+              my $tags = undef;
+              foreach my $this_tag (@{$this_instance->{'Tags'}})
+                {
+                  $tags->{$this_tag->{'Key'}} = $this_tag->{'Value'};
+                }
+
+              next if (!Helpers::Misc::isEmpty($opt->{'instance_id'}) && $opt->{'instance_id'} ne $this_instance->{'InstanceId'});
+              next if (!Helpers::Misc::isEmpty($opt->{'hostname'})    && $opt->{'hostname'} ne $tags->{'Name'});
+
+              my $aws_instance = {
+                                    'Cloud'         => qq(AWS),
+                                    'PublicIp'      => $this_instance->{'PublicIpAddress'},
+                                    'PrivateIp'     => $this_instance->{'PrivateIpAddress'},
+                                    'InstanceId'    => $this_instance->{'InstanceId'},
+                                    'RunState'      => $this_instance->{'State'}->{'Name'},
+                                    'AZ'            => $this_instance->{'Placement'}->{'AvailabilityZone'},
+                                    'LaunchedAt'    => $this_instance->{'LaunchTime'},
+                                    'InstanceType'  => $this_instance->{'InstanceType'},
+                                  };
+
+              $aws_instance->{'Tags'} = $tags if ($opt->{'with_tags'});
+              $aws_instance->{'ServerName'} = $tags->{'Name'};
+
+              # OriginSecPolReq tag contains a list of resources instance is requesting a punchole o
+              # InstanceSecPol tag contains a list of policies instances uses to assemble its punchole list
+
+              my $t = {
+                        'SecFencer'                => qq(sec_fencer_enabled),
+                        'SecFencerOriginSecPolReq' => qq(sec_fencer_ospr),
+                        'SecFncerInstanceSecPol'   => qq(sec_fencer_isp),
+                      };
+              foreach my $v (keys %$t)
+                {
+                  $aws_instance->{$v} = $tags->{$t->{$v}} if (!Helpers::Misc::isEmpty($tags->{$t->{$v}}));
+                }
+
+              # we actually support only one security group per instance because AWSs permissive model
+              # is dumb. For now we will always use the "last" entry
+
+              if (defined $this_instance->{'SecurityGroups'})
+                {
+                  foreach my $this_security_group (@{$this_instance->{'SecurityGroups'}})
+                    {
+                      $aws_instance->{'SecurityGroupName'} = $this_security_group->{'GroupName'};
+                      $aws_instance->{'SecurityGroupId'}   = $this_security_group->{'GroupId'};
+                    }
+                }
+
+              push @all_instances, $aws_instance;
+            }
+        }
+    }
+
+  if (my $total_instances = scalar @all_instances)
+    {
+      my ($resp, $ptr) = (undef, undef);
+      if ($total_instances == 1 && $opt->{'single_instance'}) { $ptr = $all_instances[0]; } else { $ptr = \@all_instances; }
+      ($ret, $resp) = Helpers::Misc::toJSON($ptr, { 'pretty' => 1 });
+      print $resp;
+    }
+  exit(0);
+}
+
+exit(0);
+
+sub aws_ec2_get_regions
+{
+  my ($ret, $reg_json_ptr) = Helpers::Misc::readFile("aws ec2 describe-regions|");
+  return (0, ERR_EC2_NO_REGIONS) if (!$ret);
+
+  my $regions = undef;
+  ($ret, $regions) = Helpers::Misc::fromJSON($$reg_json_ptr);
+
+  return (0, ERR_EC2_MALFORMATTED_REGIONS) if (!$ret);
+  return (0, ERR_EC2_MALFORMATTED_REGIONS) if (Helpers::Misc::isEmpty($regions->{'Regions'}) || ref $regions->{'Regions'} ne qq(ARRAY));
+
+  my $sane_regions = undef;
+  foreach my $this_region (@{$regions->{'Regions'}})
+    {
+      $sane_regions->{$this_region->{'RegionName'}} = $this_region;
+    }
+  return (1, $sane_regions)
+}
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --regions=<list>   List instances from AWS EC2 regions <list>. Region\n");
+  printf("                         names must be of comma separated\n");
+  printf("                         Default: all known regions\n");
+  printf("      --instance-id=<id> Only display information about instance <id>\n");
+  printf("                         Default: all instances\n");
+  printf("      --with-tags        Include all tags assigned to instances\n");
+  printf("                         Default: no\n");
+  printf("      --help             This help\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(0);
+
+}

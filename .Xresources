@@ -1,0 +1,12 @@
+! Xterm for the win
+xterm*faceName: dejaVu Sans Mono Book
+xterm*faceSize: 11
+xterm*loginsheell: true
+xterm*savelines:20000
+xterm*rightScrollBar: true
+xterm*ScrollBar: true
+xterm*scrollTtyOutput: false
+
+! lets do the double clicking goodies
+
+xterm*charClass: 33:48,36-47:48,58-59:48,61:48,63-64:48,95:48,126:48
