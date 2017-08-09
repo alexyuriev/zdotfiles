@@ -11,7 +11,7 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.02";
+  our $VERSION = "0.03";
 }
 
 sub readFile
@@ -28,6 +28,32 @@ sub readFile
       $ret = 1;
     }
   return ($ret, \$txt);
+}
+
+sub writeFile
+{
+  my $fname = shift @_;
+  my $txt = shift @_;
+  my $opt = shift @_;
+
+  return (0, qq(File name not defined)) if (isEmpty($fname));
+
+  my $fhw = FileHandle->new($fname, "w");
+  return (0, qq(Failed to open file $fname for writing)) if (!defined $fhw);
+  if (defined $opt && defined $opt->{'mode'})
+    {
+      my $count = chmod $opt->{'mode'}, $fname;
+      if (!$count)
+        {
+          $fhw->close();
+          $count = unlink $fname;
+          return (0, qq(Failed to set mode of $fname to ) . $opt->{'mode'} . qq( and failed to delete the file. This is bad)) if (!$count);
+          return (0, qq(Failed to set mode of $fname to ) . $opt->{'mode'} . qq( so it is deleted));
+        }
+    }
+  $fhw->print($txt);
+  $fhw->close();
+  return (1, qq(OK));
 }
 
 sub isEmpty
