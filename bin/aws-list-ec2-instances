@@ -5,7 +5,7 @@
 # Extract useful information from aws ec2 describe instances
 # Requires configured aws tool
 #
-# Version 0.0.8
+# Version 0.0.9
 
 use strict;
 use warnings;
@@ -52,7 +52,7 @@ use constant ERR_EC2_MALFORMATTED_INSTANCES    => qq(AWS EC2 instance list for r
                 'TOOL_DESC'       => qq(Lists AWS EC2 instances),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 8,
+                'TOOL_VER_PATCH'  => 9,
                 'regions'         => undef,
                 'instance_id'     => undef,
                 'hostname'        => undef,
@@ -210,6 +210,8 @@ sub display_help_and_exit
   printf("                         names must be of comma separated\n");
   printf("                         Default: all known regions\n");
   printf("      --instance-id=<id> Only display information about instance <id>\n");
+  printf("                         Default: all instances\n");
+  printf("      --hostname=<name>  Only display information about instance with hostname <host>\n");
   printf("                         Default: all instances\n");
   printf("      --with-tags        Include all tags assigned to instances\n");
   printf("                         Default: no\n");
