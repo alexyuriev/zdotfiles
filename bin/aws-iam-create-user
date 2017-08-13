@@ -1,0 +1,116 @@
+#!/usr/bin/perl
+
+# aws-iam-create-user
+#
+# Creates AWS user
+# Requires configured aws tool
+#
+# Version 0.0.2
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::Misc;
+use Helpers::AWS;
+
+use constant ERR_MISSING_USER_NAME => qq(Must provide a user name to create);
+use constant ERR_INVALID_USER_NAME => qq(A username or username prefix of AWS can only contain [A-Z|0-9|_-);
+use constant ERR_INVALID_PATH      => qq(A path or path prefix of AWS can only contain [A-Z|0-9|_-/]);
+use constant ERR_EC2_AWS_FAILURE   => qq(Failed to properly communicated with AWS to create a user);
+use constant ERR_EC2_AWS_NO_JSON   => qq(AWS API responded with something other than a JSON);
+
+{
+
+  my $opt = {
+                'TOOL_NAME'       => qq(aws-iam-create-user),
+                'TOOL_DESC'       => qq(Creates AWS IAM user),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 2,
+                'uname_prefix'    => undef,
+                'username'        => undef,
+                'path_prefix'     => undef,
+                'path'            => '',
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  my $ret = GetOptions(   "username=s"     => \$opt->{'username'},
+                          "uname-prefix=s" => \$opt->{'uname_prefix'},
+                          "path=s"         => \$opt->{'path'},
+                          "path-prefix=s"  => \$opt->{'path_prefix'},
+                          "help"           => \$opt->{'help'},
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  Helpers::Misc::display_and_exit(-1, ERR_MISSING_USER_NAME)       if (Helpers::Misc::isEmpty($opt->{'username'}));
+  $opt->{'username'} = $opt->{'uname_prefix'} . $opt->{'username'} if (!Helpers::Misc::isEmpty($opt->{'uname_prefix'}));
+  Helpers::Misc::display_and_exit(-1, ERR_INVALID_USER_NAME)       if (!Helpers::AWS::isValidAWSUsername($opt->{'username'}));
+
+  $opt->{'path_prefix'} = '/'                                   if (Helpers::Misc::isEmpty($opt->{'path_prefix'}));
+  $opt->{'path'} = ''                                           if (Helpers::Misc::isEmpty($opt->{'path'}));
+  $opt->{'path'} = $opt->{'path_prefix'} . $opt->{'path'} . '/' if (!Helpers::Misc::isEmpty($opt->{'path_prefix'}));
+  $opt->{'path'} =~ s/\/+/\//g;
+  $opt->{'path'} =~ s/\/+$/\//g;
+  Helpers::Misc::display_and_exit(-1, ERR_INVALID_PATH)         if (!Helpers::AWS::isValidAWSUserPath($opt->{'path_prefix'}));
+
+  my $response_ptr = undef;
+
+  my $cmd = qq(aws iam create-user --user-name ) . $opt->{'username'} . qq( --path ) . $opt->{'path'};
+  ($ret, $response_ptr) = Helpers::Misc::readFile("$cmd|");
+  Helpers::Misc::display_and_exit(-1, ERR_EC2_AWS_FAILURE . $response_ptr) if (!$ret);
+
+  my $user_obj = undef;
+  ($ret, $user_obj) = Helpers::Misc::fromJSON($$response_ptr);
+  Helpers::Misc::display_and_exit(-1, ERR_EC2_AWS_NO_JSON) if (!$ret);
+  print $$response_ptr;
+  exit(0);
+}
+
+exit(0);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --uname-prefix=<prefix>         Specify prefix for a username\n");
+  printf("                                      Default: %s\n", $opt->{'uname_prefix'});
+  printf("      --username=<name>               Create AWS user named <prefix><name>\n");
+  printf("                                      Default: %s\n", $opt->{'username'});
+  printf("      --path-prefix=<path_prefix>     Specifies a prefix for AWS path \n");
+  printf("                                      Default: %s\n", $opt->{'path_prefix'});
+  printf("      --path=<path>                   Sets AWS path of a user to <path_prefix><path>\n");
+  printf("                                      Default: %s\n", $opt->{'path'});
+  printf("      --help                          This help\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(0);
+
+}
