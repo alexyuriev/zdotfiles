@@ -1,0 +1,217 @@
+#!/usr/bin/perl
+
+# aws-set-ec2-sec-group
+#
+# Edits AWS EC2 security group
+# Requires configured aws tool
+#
+# Version 0.0.2
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+
+use Helpers::AWS;
+use Helpers::Misc;
+
+{
+
+  my $opt = {
+                'TOOL_NAME'       => qq(aws-set-ec2-sec-groups),
+                'TOOL_DESC'       => qq(Sets AWS EC2 security group to a specific policy),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 2,
+                'command'         => undef,
+                'group_name'      => undef,
+                'group_id'        => undef,
+                'json_file'       => undef,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  my $ret = GetOptions(   "group-name=s"  => \$opt->{'group_name'},
+                          "group-id=s"    => \$opt->{'group_id'},
+                          "policy-file=s" => \$opt->{'json_file'},
+                          "help"          => \$opt->{'help'}
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+  Helpers::Misc::display_and_exit(-1, qq(Must provide a security group name or security group id)) if (Helpers::Misc::isEmpty($opt->{'group_name'}) && Helpers::Misc::isEmpty($opt->{'group_id'}));
+  Helpers::Misc::display_and_exit(-1, qq(Cannot mix security group name and security group id)) if (!Helpers::Misc::isEmpty($opt->{'group_name'}) && !Helpers::Misc::isEmpty($opt->{'group_id'}));
+  if ($opt->{'group_name'}) { $opt->{'group_txt'} = $opt->{'group_txt'}; } else { $opt->{'group_txt'} = $opt->{'group_id'}; }
+
+  Helpers::Misc::display_and_exit(-1, qq(Must provide a JSON policy file)) if (Helpers::Misc::isEmpty($opt->{'json_file'}));
+
+  my $response_ptr = undef;
+  ($ret, $response_ptr) = Helpers::Misc::readFile($opt->{'json_file'});
+  Helpers::Misc::display_and_exit(-1, qq(Failed to read JSON file for security policy %s : %s), $opt->{'group_txt'}, $response_ptr) if (!$ret);
+
+  my $policy_obj = undef;
+  ($ret, $policy_obj) = Helpers::Misc::fromJSON($$response_ptr);
+  Helpers::Misc::display_and_exit(-1, qq(Content of %s policy file does not appear to be a JSON: %s), $opt->{'json_file'}, $policy_obj) if (!$ret);
+  Helpers::Misc::display_and_exit(-1, qq(Missing sec_fencer->incoming_allow in the policy JSON)) if (!defined $policy_obj->{'sec_fencer'} || !defined $policy_obj->{'sec_fencer'}->{'incoming_allow'});
+
+  my $sec_group_rules = undef;
+  ($ret, $sec_group_rules) = sec_fencer_get_group_rules($opt->{'group_id'});
+  Helpers::Misc::display_and_exit(-1, qq(Failed to get crunched security group data from AWS: ) . $response_ptr) if (!$ret);
+
+  my $rule_number = 0;
+  foreach my $this_rule (@{$policy_obj->{'sec_fencer'}->{'incoming_allow'}})
+    {
+      my $v = undef;
+      ($ret, $v) = sec_fencer_validate_rule($this_rule);
+      Helpers::Misc::display_and_exit(-1, qq(Invalid fencer security rule %s : %s), $rule_number + 1, $v) if (!$ret);
+    }
+
+  my @add_rules = ();
+  foreach my $this_rule (@{$policy_obj->{'sec_fencer'}->{'incoming_allow'}})
+    {
+      next if (sec_fencer_rule_exists($this_rule, $sec_group_rules));
+      push @add_rules, $this_rule;
+    }
+
+  my @remove_rules = ();
+  foreach my $this_rule (@{$sec_group_rules})
+    {
+      next if (sec_fencer_rule_exists($this_rule, $policy_obj->{'sec_fencer'}->{'incoming_allow'}));
+      push @remove_rules, $this_rule;
+    }
+
+  my $r = undef;
+  if (scalar @add_rules)
+    {
+      ($ret, $r) = sec_fencer_process_rules($opt->{'group_id'}, qq(add), \@add_rules);
+      Helpers::Misc::display_and_exit(-1, qq(Failed to add rules to security group %s: %s), $opt->{'group_id'}, $r) if (!$ret);
+    }
+  if (scalar @remove_rules)
+    {
+      ($ret, $r) = sec_fencer_process_rules($opt->{'group_id'}, qq(remove), \@remove_rules);
+      Helpers::Misc::display_and_exit(-1, qq(Failed to remove rules to security group ) . $opt->{'group_id'} . qq( : $r)) if (!$ret);
+    }
+  exit(0);
+}
+
+exit(0);
+
+sub sec_fencer_rule_exists
+{
+  my $rule = shift @_;
+  my $policy = shift @_;
+
+  return 0 if (!defined $rule);
+  return 0 if (!defined $policy);
+
+  foreach my $policy_rule (@{$policy})
+    {
+      my $match_count = 0;
+      my @all_keys = keys %{$rule};
+      my $max_match_count = scalar @all_keys;
+      return 0 if (!$max_match_count);
+
+      foreach my $key (keys %{$rule})
+        {
+          next if (!defined $policy_rule->{$key});
+          next if (!$policy_rule->{$key} ne $rule->{$key});
+          $match_count++;
+        }
+      return 1 if ($match_count == $max_match_count);
+    }
+  return 0;
+}
+
+sub sec_fencer_get_group_rules
+{
+  my $group_id = shift @_;
+
+  my $cmd = qq(aws-list-ec2-sec-groups --sec-fencer --group-id=$group_id|);
+
+  my ($ret, $response_ptr) = Helpers::Misc::readFile($cmd);
+  return (0, qq(Failed to fetch info on security group $group_id from AWS: ) . $response_ptr) if (!$ret);
+
+  my $sec_group = undef;
+  ($ret, $sec_group) = Helpers::Misc::fromJSON($$response_ptr);
+  return (0, qq(AWS response does not seem to be a JSON: ) . $sec_group) if (!$ret);
+  return (0, qq(Security group $group_id was not found)) if (!defined $sec_group->{'GroupId'} || $sec_group->{'GroupId'} ne $group_id);
+
+  return (1, undef) if (!defined $sec_group->{'SecFencerAllowFromCidrIpV4'});
+  return (1, $sec_group->{'SecFencerAllowFromCidrIpV4'});
+}
+
+sub sec_fencer_validate_rule
+{
+  my $rule = shift @_;
+
+  foreach my $f (qw/Port Protocol Cidr/)
+    {
+      return (0, qq(sec_fencer rule has a missing element '$f')) if (Helpers::Misc::isEmpty($rule->{$f}));
+    }
+  return (1, 'ok');
+}
+
+sub sec_fencer_process_rules
+{
+  my $group_id = shift @_;
+  my $mode = shift @_;
+  my $list = shift @_;
+
+  my $cmd_base = qq(aws-edit-ec2-sec-group --group-id=$group_id --command=$mode );
+
+  my $ret = 0;
+  foreach my $this_rule (@{$list})
+    {
+      my $cmd = $cmd_base;
+      foreach my $f (qw/Port Protocol Cidr/)
+        {
+          $cmd .= qq( --) . lc($f) . qq(=) . $this_rule->{$f};
+        }
+      print "Will execute: $cmd\n";
+      $ret = system($cmd);
+      return (0, qq(Failed to execute $cmd)) if ($ret != 0);
+    }
+  $ret = 1;
+  return ($ret, 'ok');
+}
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --group-id=<id>     Display rule for security group <id>\n");
+  printf("                          Default: all known groups\n");
+  printf("      --group-name=<name> Display rules for security group <name>\n");
+  printf("                          Default: all security groups\n");
+  printf("      --with-tags         Include all tags assigned groups\n");
+  printf("                          Default: no\n");
+  printf("      --help              This help\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(0);
+
+}
