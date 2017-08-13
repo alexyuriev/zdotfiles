@@ -11,7 +11,7 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.03";
+  our $VERSION = "0.04";
 }
 
 sub readFile
@@ -27,7 +27,8 @@ sub readFile
       $fh->close();
       $ret = 1;
     }
-  return ($ret, \$txt);
+  return ($ret, \$txt) if ($ret);
+  return ($ret, qq(Can't open $fname));
 }
 
 sub writeFile
@@ -115,7 +116,8 @@ sub display_and_exit
   $assembled_msg = '' if (Helpers::Misc::isEmpty($assembled_msg)); chomp $assembled_msg;
   $code = -1 if (Helpers::Misc::isEmpty($code));
 
-  printf("%s\n", $assembled_msg);
+  my $l = $main::logger; if (defined $l) { $l->log("%s", $assembled_msg); } else { printf("%s\n", $assembled_msg); }
+
   exit($code);
 }
 
