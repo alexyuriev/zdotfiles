@@ -5,7 +5,7 @@
 # Extract useful information from aws ec2 describe instances
 # Requires configured aws tool
 #
-# Version 0.0.2
+# Version 0.0.3
 
 use strict;
 use warnings;
@@ -30,10 +30,9 @@ BEGIN
   undef $APP_BINPATH;
 }
 
-use Getopt::Long;
-use FileHandle;
-use JSON;
-use Data::Dumper;
+use Getopt::Long qw(:config no_auto_abbrev);
+
+use Helpers::Misc;
 
 {
 
@@ -42,7 +41,7 @@ use Data::Dumper;
                 'TOOL_DESC'             => qq(Lists AWS EC2 security groups),
                 'TOOL_VER_MAJOR'        => 0,
                 'TOOL_VER_MINOR'        => 0,
-                'TOOL_VER_PATCH'        => 2,
+                'TOOL_VER_PATCH'        => 3,
                 'group_id'              => undef,
                 'group_name'            => undef,
                 'single_security_group' => 0,
@@ -61,25 +60,25 @@ use Data::Dumper;
                       );
 
   display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
-  display_and_exit(-1, qq(Parameters --group-id and --group-name cannot be used together)) if (!isEmpty($opt->{'group_id'}) && !isEmpty($opt->{'group_name'}));
-  $opt->{'single_security_group'} = 1 if (!isEmpty($opt->{'group_id'}) || !isEmpty($opt->{'group_name'}));
+  Helpers::Misc::display_and_exit(-1, qq(Parameters --group-id and --group-name cannot be used together)) if (!Helpers::Misc::isEmpty($opt->{'group_id'}) && !Helpers::Misc::isEmpty($opt->{'group_name'}));
+  $opt->{'single_security_group'} = 1 if (!Helpers::Misc::isEmpty($opt->{'group_id'}) || !Helpers::Misc::isEmpty($opt->{'group_name'}));
 
   my $sec_groups_list_ptr = undef;
-  ($ret, $sec_groups_list_ptr) = readFile("aws ec2 describe-security-groups|");
-  display_and_exit(-1, qq(Failed to fetch security groups from AWS: ) . $sec_groups_list_ptr) if (!$ret);
+  ($ret, $sec_groups_list_ptr) = Helpers::Misc::readFile("aws ec2 describe-security-groups|");
+  Helpers::Misc::display_and_exit(-1, qq(Failed to fetch security groups from AWS: ) . $sec_groups_list_ptr) if (!$ret);
 
   my $sec_groups_list = undef;
-  ($ret, $sec_groups_list) = fromJSON($$sec_groups_list_ptr);
-  display_and_exit(-1, qq(AWS security groups do not appear to be a JSON: $sec_groups_list)) if (!$ret);
-  display_and_exit(-1, qq(JSON object does not have SecurityGroups array as the top level element)) if (!defined $sec_groups_list->{'SecurityGroups'});
+  ($ret, $sec_groups_list) = Helpers::Misc::fromJSON($$sec_groups_list_ptr);
+  Helpers::Misc::display_and_exit(-1, qq(AWS security groups do not appear to be a JSON: $sec_groups_list)) if (!$ret);
+  Helpers::Misc::display_and_exit(-1, qq(JSON object does not have SecurityGroups array as the top level element)) if (!defined $sec_groups_list->{'SecurityGroups'});
 
   my @all_security_groups = ();
 
   foreach my $this_sec_group (@{$sec_groups_list->{'SecurityGroups'}})
     {
       my $this_sg = undef;
-      next if (!isEmpty($opt->{'group_id'})   && $opt->{'group_id'} ne $this_sec_group->{'GroupId'});
-      next if (!isEmpty($opt->{'group_name'}) && $opt->{'group_name'} ne $this_sec_group->{'GroupName'});
+      next if (!Helpers::Misc::isEmpty($opt->{'group_id'})   && $opt->{'group_id'} ne $this_sec_group->{'GroupId'});
+      next if (!Helpers::Misc::isEmpty($opt->{'group_name'}) && $opt->{'group_name'} ne $this_sec_group->{'GroupName'});
 
       $this_sg->{'GroupName'} = $this_sec_group->{'GroupName'};
       $this_sg->{'GroupId'}   = $this_sec_group->{'GroupId'};
@@ -90,8 +89,8 @@ use Data::Dumper;
           $tags->{$this_tag->{'Key'}} = $this_tag->{'Value'};
         }
       $this_sg->{'Tags'} = $tags if ($opt->{'with_tags'});
-      $this_sg->{'SecFencerEnabled'}  = $tags->{'sec_fencer_enabled'}  if (!isEmpty($tags->{'sec_fencer_enabled'}));
-      $this_sg->{'SecFencerPolicies'} = $tags->{'sec_fencer_policies'} if (!isEmpty($tags->{'sec_fencer_policies'}));
+      $this_sg->{'SecFencerEnabled'}  = $tags->{'sec_fencer_enabled'}  if (!Helpers::Misc::isEmpty($tags->{'sec_fencer_enabled'}));
+      $this_sg->{'SecFencerPolicies'} = $tags->{'sec_fencer_policies'} if (!Helpers::Misc::isEmpty($tags->{'sec_fencer_policies'}));
 
       my @all_rules = ();
       my @sec_fencer_rules = ();
@@ -142,91 +141,17 @@ use Data::Dumper;
       my $resp = undef;
       my $ptr  = \@all_security_groups;
       $ptr = $all_security_groups[0] if ($total_sec_groups == 1 && $opt->{'single_security_group'});
-      ($ret, $resp) = toJSON($ptr, { 'pretty' => 1});
+      ($ret, $resp) = Helpers::Misc::toJSON($ptr, { 'pretty' => 1});
       print $resp;
     }
   exit(0);
-}
-
-sub readFile
-{
-  my $fname = shift @_;
-  my $txt = '';
-  my $ret = 0;
-
-  my $fh = FileHandle->new($fname);
-  if (defined $fh)
-    {
-      while (my $line = <$fh>) { $txt .= $line; }
-      $fh->close();
-      $ret = 1;
-    }
-  return ($ret, \$txt);
-}
-
-sub isEmpty
-{
-  my $a = shift @_;
-  my $r = 0;
-
-  return 1 if (!defined $a);
-  $r = 1 if (($a eq "") || ($a =~ m/^\s+$/g));
-
-  return $r;
-}
-
-sub fromJSON
-{
-  my $txt = shift @_;
-
-  return (0, qq(Received an undef)) if (isEmpty($txt));
-  my $json = JSON->new->utf8->allow_nonref;
-
-  my $ptr = undef;
-  eval { $ptr = $json->decode($txt); };
-  return (0, $@) if ($@);
-  return (1, $ptr);
-}
-
-sub toJSON
-{
-  my $ptr = shift @_;
-  my $is_pretty = shift @_;
-
-  return (0, qq(Received an undef)) if (!defined $ptr);
-
-  my $json = JSON->new->utf8->allow_nonref;
-  return (1, $json->pretty(1)->encode($ptr)) if ($is_pretty);
-  return (1, $json->encode($ptr));
-}
-
-sub removeSpaces
-{
-  my $txt = shift @_;
-  return '' if (isEmpty($txt));
-
-  $txt =~ s/\s+//g;
-
-  return $txt;
-}
-
-sub display_and_exit
-{
-  my $code = shift @_;
-  my $msg = shift @_;
-
-  $msg = '' if (isEmpty($msg));
-  $code = -1 if (isEmpty($code));
-
-  printf "$msg\n";
-  exit($code);
 }
 
 sub display_help_and_exit
 {
   my $opt = shift @_;
 
-  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (isEmpty($opt->{$k})); }
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
 
   printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
   printf("Options:\n\n");
