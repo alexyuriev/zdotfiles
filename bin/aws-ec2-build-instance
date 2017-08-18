@@ -1,0 +1,211 @@
+#!/usr/bin/perl
+
+# aws-ec2-build-instance
+#
+# Launches instance from the AMI
+# Requires configured aws tool
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use FileHandle;
+use JSON;
+use MIME::Base64;
+
+use Data::Dumper;
+
+use Helpers::Misc;
+use Helpers::AWS;
+
+use constant ERR_MISSIGN_CONFIG         => qq(Failed to read configuration file %s);
+use constant ERR_CONFIG_MISSING_NODE    => qq(Configuration file %s is missing node %s);
+use constant ERR_CONFIG_NOT_JSON        => qq(Configuration file %s content does not look like a valid JSON);
+use constant ERR_MISSING_AMI_ID         => qq(Must provide a valid AMI id);
+use constant ERR_MISSING_HOSTNAME       => qq(Must provide a valid hostname);
+use constant ERR_MISSING_INSTANCE_TYPE  => qq(Must provide a valid instance type);
+use constant ERR_CMD_NO_INSTANCES       => qq(Failed to get a current list of instances);
+use constant ERR_EC2_AWS_FAILURE        => qq(Failed to properly communicated with AWS to create an instance);
+use constant ERR_EC2_AWS_NO_JSON        => qq(AWS API responded with something other than a JSON);
+use constant ERR_EC2_NO_INSTANCE_IDS    => qq(Can't find instance ids in data returned by AWS API);
+use constant ERR_EC2_TOO_MANY_INSTANCES => qq(AWS EC2 returned too many instances - only 1 was expected);
+use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assigned to a non-terminated instance);
+
+{
+
+  my $opt = {
+                'TOOL_NAME'               => qq(aws-ec2-build-instance),
+                'TOOL_DESC'               => qq(Builds and lauches EC2 instance from AMI),
+                'TOOL_VER_MAJOR'          => 0,
+                'TOOL_VER_MINOR'          => 0,
+                'TOOL_VER_PATCH'          => 1,
+                'config'                  => undef,
+                'default_config'          => Helpers::Misc::get_users_home_dir() . qq(/.config/config-aws-helpers.json),
+                'ami_id'                  => undef,
+                'instance_type'           => undef,
+                'default_sg'              => undef,
+                'aws_fetch_sleep'         => 60,
+                'aws_fetch_max_attempts'  => 60,
+                'hostname'                => undef,
+                'sec_fencer_build'        => undef,
+                'verbose'                 => 1,
+                'help'                    => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  $opt->{'config'} = $opt->{'default_config'};
+
+  my $ret = GetOptions(   "config=s"          => \$opt->{'config'},
+                          "ami-id=s"          => \$opt->{'ami_id'},
+                          "intance-type=s"    => \$opt->{'instance_type'},
+                          "hostname=s"        => \$opt->{'hostname'},
+                          "sec-fencer-build"  => \$opt->{'sec_fencer_build'},
+                          "help"              => \$opt->{'help'},
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $config_json_ptr = undef;
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  Helpers::Misc::display_and_exit(-1, ERR_MISSIGN_CONFIG, $opt->{'config'}) if (!$ret && ($opt->{'config'} eq $opt->{'default_config'}));
+
+  my $config = undef;
+  if (defined $config_json_ptr)
+    {
+      my $this_config = undef;
+      ($ret, $this_config) = Helpers::Misc::fromJSON($$config_json_ptr);
+      Helpers::Misc::display_and_exit(-1, ERR_CONFIG_NOT_JSON, $opt->{'config'}) if (!$ret);
+
+      foreach my $f (qw/aws-ec2-builder/)
+        {
+          Helpers::Misc::display_and_exit(-1, ERR_CONFIG_MISSING_NODE, $opt->{'config'}, $f) if (Helpers::Misc::isEmpty($this_config->{$f}));
+        }
+      $config = $this_config->{'aws-ec2-builder'};
+    }
+
+  foreach my $f (qw/ami_id hostname instance_type security_group sec_fencer_build/)
+    {
+      $config->{$f} = $opt->{$f} if (!Helpers::Misc::isEmpty($opt->{$f}));
+    }
+
+  Helpers::Misc::display_and_exit(-1, ERR_MISSING_AMI_ID)        if (!Helpers::AWS::isValidAMI($config->{'ami_id'}));
+  Helpers::Misc::display_and_exit(-1, ERR_MISSING_HOSTNAME)      if (!Helpers::AWS::isValidHostname($config->{'hostname'}));
+  Helpers::Misc::display_and_exit(-1, ERR_MISSING_INSTANCE_TYPE) if (!Helpers::AWS::isValidInstanceType($config->{'instance_type'}));
+
+  printf("Getting information about the running instances...\n") if ($opt->{'verbose'});
+  my $instance_list_json_ptr = undef;
+  my $cmd = qq(aws-list-ec2-instances);
+  ($ret, $instance_list_json_ptr) = Helpers::Misc::readFile("$cmd|");
+  Helpers::Misc::display_and_exit(-1, ERR_CMD_NO_INSTANCES) if (!$ret);
+
+  my $instance_list = undef;
+  ($ret, $instance_list) = Helpers::Misc::fromJSON($$instance_list_json_ptr);
+  Helpers::Misc::display_and_exit(-1, ERR_EC2_AWS_NO_JSON) if (!$ret);
+
+  foreach my $this_instance (@{$instance_list})
+    {
+      next if (Helpers::Misc::isEmpty($this_instance->{'RunState'}));
+      next if (Helpers::Misc::isEmpty($this_instance->{'ServerName'}));
+      Helpers::Misc::display_and_exit(-1, ERR_HOSTNAME_EXISTS) if ($this_instance->{'ServerName'} eq $opt->{'hostname'} && $this_instance->{'RunState'} ne qq(terminated));
+    }
+
+  my $user_data = {
+                    'sec_fencer'   => 1,
+                    'provisioning' => 1,
+                    'hostname'     => $config->{'hostname'},
+                  };
+
+  my $user_data_json = undef;
+  ($ret, $user_data_json) = Helpers::Misc::toJSON($user_data);
+  my $user_data_base64 = MIME::Base64::encode_base64($user_data_json);
+  chomp $user_data_base64;
+
+  $cmd  = qq(aws ec2 run-instances);
+  $cmd .= qq( --count 1);
+  $cmd .= qq( --security-group-ids ) . $config->{'security_group'};
+  $cmd .= qq( --image-id ) . $config->{'ami_id'};
+  $cmd .= qq( --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=) . $opt->{'hostname'} . qq(}]');
+  $cmd .= qq( --instance-type ) . $config->{'instance_type'};
+  $cmd .= qq( --user-data $user_data_base64) if ($config->{'sec_fencer_build'});
+
+  printf("Building and running a new instance with type %s with hostname %s\n", $config->{'instance_type'}, $opt->{'hostname'}) if ($opt->{'verbose'});
+
+  my $response_ptr = undef;
+  ($ret, $response_ptr) = Helpers::Misc::readFile("$cmd|");
+  Helpers::Misc::display_and_exit(-1, ERR_EC2_AWS_FAILURE . $response_ptr) if (!$ret);
+
+  my $instance_obj = undef;
+  ($ret, $instance_obj) = Helpers::Misc::fromJSON($$response_ptr);
+  Helpers::Misc::display_and_exit(-1, ERR_EC2_AWS_NO_JSON) if (!$ret);
+
+  my $launched_instance = undef;
+  my $count = 0;
+  foreach my $this_instance (@{$instance_obj->{'Instances'}})
+    {
+      $launched_instance->{'InstanceId'} = $this_instance->{'InstanceId'};
+      $launched_instance->{'AZ'}         = $this_instance->{'Placement'}->{'AvailabilityZone'};
+      $count++;
+    }
+
+  Helpers::Misc::display_and_exit(-1, ERR_EC2_TOO_MANY_INSTANCES) if ($count != 1);
+  Helpers::Misc::display_and_exit(-1, ERR_EC2_NO_INSTANCE_IDS) if (!$launched_instance->{'InstanceId'});
+
+  my $instance_json = undef;
+  ($ret, $instance_json) = Helpers::Misc::toJSON($launched_instance, { 'pretty' => 1 });
+  printf("%s\n", $instance_json);
+
+}
+
+exit(0);
+
+
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --config=<config.json>          Read base configuration from <config.json>");
+  printf("                                      Default: %s\n", $opt->{'config'});
+  printf("      --image-id=<id>                 Launch from AMI <id>\n");
+  printf("                                      Default: %s\n", $opt->{'ami_id'});
+  printf("      --hostname=<name>               Set instance hostname to <hostname>\n");
+  printf("                                      Default: %s\n", $opt->{'hostname'});
+  printf("      --instance-type=<type>          Launch instance type <type>\n");
+  printf("                                      Default: %s\n", $opt->{'instance_type'});
+  printf("      --sec-fencer-build              This is a build for instance using Sec_Fencer\n");
+  printf("                                      Default: No\n");
+  printf("      --verbose                       Add additional details in logging\n");
+  printf("                                      Default: No\n");
+  printf("      --help                          This help\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(0);
+
+}
