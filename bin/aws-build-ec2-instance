@@ -31,6 +31,7 @@ BEGIN
 }
 
 use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::AWS;
 use FileHandle;
 use JSON;
 use MIME::Base64;
@@ -141,6 +142,7 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
   my $user_data_json = undef;
   ($ret, $user_data_json) = Helpers::Misc::toJSON($user_data);
   my $user_data_base64 = MIME::Base64::encode_base64($user_data_json);
+  $user_data_base64 =~ s/\n//g;
   chomp $user_data_base64;
 
   $cmd  = qq(aws ec2 run-instances);
@@ -152,6 +154,8 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
   $cmd .= qq( --user-data $user_data_base64) if ($config->{'sec_fencer_build'});
 
   printf("Building and running a new instance with type %s with hostname %s\n", $config->{'instance_type'}, $opt->{'hostname'}) if ($opt->{'verbose'});
+
+  print "cmd = $cmd\n";
 
   my $response_ptr = undef;
   ($ret, $response_ptr) = Helpers::Misc::readFile("$cmd|");
@@ -167,6 +171,7 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
     {
       $launched_instance->{'InstanceId'} = $this_instance->{'InstanceId'};
       $launched_instance->{'AZ'}         = $this_instance->{'Placement'}->{'AvailabilityZone'};
+      $launched_instance->{'Region'}     = Helpers::AWS::azToRegion($this_instance->{'Placement'}->{'AvailabilityZone'});
       $count++;
     }
 
@@ -191,7 +196,7 @@ sub display_help_and_exit
 
   printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
   printf("Options:\n\n");
-  printf("      --config=<config.json>          Read base configuration from <config.json>");
+  printf("      --config=<config.json>          Read base configuration from <config.json>\n");
   printf("                                      Default: %s\n", $opt->{'config'});
   printf("      --image-id=<id>                 Launch from AMI <id>\n");
   printf("                                      Default: %s\n", $opt->{'ami_id'});
