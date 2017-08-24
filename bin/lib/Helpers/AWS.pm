@@ -13,7 +13,7 @@ use JSON;
 use Helpers::Misc;
 
 BEGIN {
-  our $VERSION = "0.02";
+  our $VERSION = "0.03";
 }
 
 
@@ -23,6 +23,23 @@ my $AWS_EC2_TYPES = {
                       't1.micro'  => 1,
                       't2.micro'  => 1,
                     };
+
+my $AWS_EC2_REGIONS = {
+                        'us-east-1'       => 1,
+                        'us-east-2'       => 1,
+                        'us-west-1'       => 1,
+                        'us-west-2'       => 1,
+                        'eu-west-1'       => 1,
+                        'eu-west-2'       => 1,
+                        'ap-south-1'      => 1,
+                        'ap-northeast-1'  => 1,
+                        'ap-northeast-2'  => 1,
+                        'ap-southeast-1'  => 1,
+                        'ap-southeast-2'  => 1,
+                        'sa-east-1'       => 1,
+                        'ca-central-1'    => 1,
+                        'eu-central-1'    => 1,
+                      };
 
 my $AWS_EC2_RUN_STATES =  {
                             'running' => 1,
@@ -105,6 +122,19 @@ sub getInstanceIds
     }
   return undef if (!scalar @ids);
   return \@ids;
+}
+
+sub azToRegion {
+
+  my $az = shift @_;
+
+  return undef if (!defined $az);
+
+  foreach my $r (keys %$AWS_EC2_REGIONS)
+    {
+      return $r if ($az =~ m/^$r/)
+    }
+  return undef;
 }
 
 1;
