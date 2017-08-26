@@ -11,7 +11,7 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.04";
+  our $VERSION = "0.05";
 }
 
 sub readFile
@@ -125,5 +125,63 @@ sub get_users_home_dir
 {
   return $ENV{'HOME'};
 }
+
+sub isInArray {
+  my $array_ptr = shift @_;
+  my $elem = shift @_;
+
+  my $ret = 0;
+  foreach my $this_elem (@$array_ptr)
+    {
+      if ($this_elem eq $elem)
+        {
+          $ret = 1;
+          last;
+        }
+    }
+  return $ret;
+}
+
+sub isValidPortNumber
+{
+  my $port = shift @_;
+
+  return 0 if (!Helpers::Misc::isUnsignedInteger($port));
+  return 0 if ($port > 65534);
+  return 1;
+}
+
+sub isValidIpv4CIDR
+{
+  my $cidr = shift @_;
+
+  return 0 if (Helpers::Misc::isEmpty($cidr));
+  my ($oct1, $oct2, $oct3, $oct4_extra, $junk) = split('\.', $cidr, 4);
+  return 0 if (!Helpers::Misc::isEmpty($junk));
+
+  my ($oct4, $net) = split('/', $oct4_extra);
+  foreach my $oct ($oct1, $oct2, $oct3, $oct4)
+    {
+      return 0 if (!isUnsignedInteger($oct));
+      return 0 if ($oct > 255);
+    }
+  return 0 if (!isUnsignedInteger($net));
+  return 0 if ($net > 32);
+  return 1;
+
+}
+
+sub isUnsignedInteger
+{
+  my $a = shift @_;
+
+  my $r = 0;
+  if (!isEmpty($a))
+    {
+      $r = 1 if ( $a =~ /^\d+$/g);
+    }
+  return $r;
+}
+
 
 1;
