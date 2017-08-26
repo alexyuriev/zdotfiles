@@ -5,7 +5,7 @@
 # Extract useful information from aws ec2 describe instances
 # Requires configured aws tool
 #
-# Version 0.0.3
+# Version 0.0.4
 
 use strict;
 use warnings;
@@ -41,7 +41,7 @@ use Helpers::Misc;
                 'TOOL_DESC'             => qq(Lists AWS EC2 security groups),
                 'TOOL_VER_MAJOR'        => 0,
                 'TOOL_VER_MINOR'        => 0,
-                'TOOL_VER_PATCH'        => 3,
+                'TOOL_VER_PATCH'        => 4,
                 'group_id'              => undef,
                 'group_name'            => undef,
                 'single_security_group' => 0,
@@ -107,9 +107,9 @@ use Helpers::Misc;
               if ($opt->{'sec_fencer'})
                 {
                   my $this_fencer_rule = {
-                                            'Port'      => $this_rule->{'Port'},
-                                            'Protocol'  => $this_rule->{'Protocol'},
-                                            'Cidr'      => $this_cidr->{'CidrIp'},
+                                            'port'      => $this_rule->{'Port'},
+                                            'protocol'  => $this_rule->{'Protocol'},
+                                            'cidr'      => $this_cidr->{'CidrIp'},
                                           };
                   push @sec_fencer_rules, $this_fencer_rule;
                 }
