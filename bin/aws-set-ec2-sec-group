@@ -2,10 +2,10 @@
 
 # aws-set-ec2-sec-group
 #
-# Edits AWS EC2 security group
+# Sets policy AWS EC2 security group based on JSON file
 # Requires configured aws tool
 #
-# Version 0.0.2
+# Version 0.0.3
 
 use strict;
 use warnings;
@@ -42,7 +42,7 @@ use Helpers::Misc;
                 'TOOL_DESC'       => qq(Sets AWS EC2 security group to a specific policy),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 2,
+                'TOOL_VER_PATCH'  => 3,
                 'command'         => undef,
                 'group_name'      => undef,
                 'group_id'        => undef,
@@ -61,22 +61,27 @@ use Helpers::Misc;
   display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
   Helpers::Misc::display_and_exit(-1, qq(Must provide a security group name or security group id)) if (Helpers::Misc::isEmpty($opt->{'group_name'}) && Helpers::Misc::isEmpty($opt->{'group_id'}));
   Helpers::Misc::display_and_exit(-1, qq(Cannot mix security group name and security group id)) if (!Helpers::Misc::isEmpty($opt->{'group_name'}) && !Helpers::Misc::isEmpty($opt->{'group_id'}));
-  if ($opt->{'group_name'}) { $opt->{'group_txt'} = $opt->{'group_txt'}; } else { $opt->{'group_txt'} = $opt->{'group_id'}; }
+  $opt->{'group_txt'} = $opt->{'group_name'} || $opt->{'group_id'};
+#  if ($opt->{'group_name'}) { $opt->{'group_txt'} = $opt->{'group_name'}; } else { $opt->{'group_txt'} = $opt->{'group_id'}; }
 
   Helpers::Misc::display_and_exit(-1, qq(Must provide a JSON policy file)) if (Helpers::Misc::isEmpty($opt->{'json_file'}));
 
   my $response_ptr = undef;
   ($ret, $response_ptr) = Helpers::Misc::readFile($opt->{'json_file'});
-  Helpers::Misc::display_and_exit(-1, qq(Failed to read JSON file for security policy %s : %s), $opt->{'group_txt'}, $response_ptr) if (!$ret);
+  Helpers::Misc::display_and_exit(-1, qq(Failed to read JSON policy file for security group %s: %s), $opt->{'group_txt'}, $response_ptr) if (!$ret);
 
   my $policy_obj = undef;
   ($ret, $policy_obj) = Helpers::Misc::fromJSON($$response_ptr);
   Helpers::Misc::display_and_exit(-1, qq(Content of %s policy file does not appear to be a JSON: %s), $opt->{'json_file'}, $policy_obj) if (!$ret);
   Helpers::Misc::display_and_exit(-1, qq(Missing sec_fencer->incoming_allow in the policy JSON)) if (!defined $policy_obj->{'sec_fencer'} || !defined $policy_obj->{'sec_fencer'}->{'incoming_allow'});
 
+  my $group_opt = undef;
+  $group_opt->{'group-id'}   = $opt->{'group_id'}   if (defined $opt->{'group_id'});
+  $group_opt->{'group-name'} = $opt->{'group_name'} if (defined $opt->{'group_name'});
+
   my $sec_group_rules = undef;
-  ($ret, $sec_group_rules) = sec_fencer_get_group_rules($opt->{'group_id'});
-  Helpers::Misc::display_and_exit(-1, qq(Failed to get crunched security group data from AWS: ) . $response_ptr) if (!$ret);
+  ($ret, $sec_group_rules) = sec_fencer_get_group_rules($group_opt);
+  Helpers::Misc::display_and_exit(-1, qq(Failed to get crunched security group data from AWS: ), $response_ptr) if (!$ret);
 
   my $rule_number = 0;
   foreach my $this_rule (@{$policy_obj->{'sec_fencer'}->{'incoming_allow'}})
@@ -103,13 +108,13 @@ use Helpers::Misc;
   my $r = undef;
   if (scalar @add_rules)
     {
-      ($ret, $r) = sec_fencer_process_rules($opt->{'group_id'}, qq(add), \@add_rules);
-      Helpers::Misc::display_and_exit(-1, qq(Failed to add rules to security group %s: %s), $opt->{'group_id'}, $r) if (!$ret);
+      ($ret, $r) = sec_fencer_process_rules($group_opt, qq(add), \@add_rules);
+      Helpers::Misc::display_and_exit(-1, qq(Failed to add rules to security group %s: %s), $opt->{'group_txt'}, $r) if (!$ret);
     }
   if (scalar @remove_rules)
     {
-      ($ret, $r) = sec_fencer_process_rules($opt->{'group_id'}, qq(remove), \@remove_rules);
-      Helpers::Misc::display_and_exit(-1, qq(Failed to remove rules to security group ) . $opt->{'group_id'} . qq( : $r)) if (!$ret);
+      ($ret, $r) = sec_fencer_process_rules($group_opt, qq(remove), \@remove_rules);
+      Helpers::Misc::display_and_exit(-1, qq(Failed to remove rules to security group %s: %s), $opt->{'group_txt'}, $r) if (!$ret);
     }
   exit(0);
 }
@@ -144,17 +149,40 @@ sub sec_fencer_rule_exists
 
 sub sec_fencer_get_group_rules
 {
-  my $group_id = shift @_;
+  my $opt = shift @_;
 
-  my $cmd = qq(aws-list-ec2-sec-groups --sec-fencer --group-id=$group_id|);
+  my $cmd = qq(aws-list-ec2-sec-groups --sec-fencer );
+
+  my $group_txt = undef;
+  foreach my $f (qw/group-id group-name/)
+    {
+      if (defined $opt->{$f})
+        {
+          $cmd .= qq(--$f=) . $opt->{$f};
+          $group_txt = $opt->{$f};
+          last;
+        }
+    }
+  $cmd .= qq(|);
 
   my ($ret, $response_ptr) = Helpers::Misc::readFile($cmd);
-  return (0, qq(Failed to fetch info on security group $group_id from AWS: ) . $response_ptr) if (!$ret);
+  return (0, qq(Failed to fetch info on security group $group_txt from AWS: ) . $response_ptr) if (!$ret);
 
   my $sec_group = undef;
   ($ret, $sec_group) = Helpers::Misc::fromJSON($$response_ptr);
   return (0, qq(AWS response does not seem to be a JSON: ) . $sec_group) if (!$ret);
-  return (0, qq(Security group $group_id was not found)) if (!defined $sec_group->{'GroupId'} || $sec_group->{'GroupId'} ne $group_id);
+
+  my $errmsg = qq(Security group $group_txt was not gound);
+  return (0, $errmsg) if (!defined $sec_group->{'GroupId'});
+
+  if (defined $opt->{'group-id'})
+    {
+      return (0, $errmsg) if ($sec_group->{'GroupId'} ne $opt->{'group-id'});
+    }
+  if (defined $opt->{'group-name'})
+    {
+      return (0, $errmsg) if ($sec_group->{'GroupName'} ne $opt->{'group-name'});
+    }
 
   return (1, undef) if (!defined $sec_group->{'SecFencerAllowFromCidrIpV4'});
   return (1, $sec_group->{'SecFencerAllowFromCidrIpV4'});
@@ -164,7 +192,7 @@ sub sec_fencer_validate_rule
 {
   my $rule = shift @_;
 
-  foreach my $f (qw/Port Protocol Cidr/)
+  foreach my $f (qw/port protocol cidr/)
     {
       return (0, qq(sec_fencer rule has a missing element '$f')) if (Helpers::Misc::isEmpty($rule->{$f}));
     }
@@ -173,17 +201,34 @@ sub sec_fencer_validate_rule
 
 sub sec_fencer_process_rules
 {
-  my $group_id = shift @_;
+  my $opt = shift @_;
   my $mode = shift @_;
   my $list = shift @_;
 
-  my $cmd_base = qq(aws-edit-ec2-sec-group --group-id=$group_id --command=$mode );
+  use Data::Dumper;
+
+  print "sec_fencer_process_rules():\n";
+  print "mode = $mode\n";
+  print Dumper($list);
+
+  my $cmd_base = qq(aws-edit-ec2-sec-group --command=$mode );
+
+  my $group_txt = undef;
+  foreach my $f (qw/group-id group-name/)
+    {
+      if (defined $opt->{$f})
+        {
+          $cmd_base .= qq(--$f=) . $opt->{$f};
+          $group_txt = $opt->{$f};
+          last;
+        }
+    }
 
   my $ret = 0;
   foreach my $this_rule (@{$list})
     {
       my $cmd = $cmd_base;
-      foreach my $f (qw/Port Protocol Cidr/)
+      foreach my $f (qw/port protocol cidr/)
         {
           $cmd .= qq( --) . lc($f) . qq(=) . $this_rule->{$f};
         }
@@ -203,13 +248,13 @@ sub display_help_and_exit
 
   printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
   printf("Options:\n\n");
-  printf("      --group-id=<id>     Display rule for security group <id>\n");
-  printf("                          Default: all known groups\n");
-  printf("      --group-name=<name> Display rules for security group <name>\n");
-  printf("                          Default: all security groups\n");
-  printf("      --with-tags         Include all tags assigned groups\n");
-  printf("                          Default: no\n");
-  printf("      --help              This help\n\n");
+  printf("      --group-id=<id>              Set policy for security group <id>\n");
+  printf("                                   Default: %s\n", $opt->{'group_id'});
+  printf("      --group-name=<name>          Set policy for security group <name>\n");
+  printf("                                   Default: %s\n", $opt->{'group_name'});
+  printf("      --policy-file=<policy.json>  Read security group policy from file <policy.json>\n");
+  printf("                                   Default: %s\n", $opt->{'json_file'});
+  printf("      --help                       This help\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
 
   exit(0);
