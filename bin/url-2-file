@@ -1,0 +1,152 @@
+#!/usr/bin/perl
+
+# url-2-file
+#
+# Stores content of the URL in a file
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use LWP::UserAgent;
+
+use Helpers::Misc;
+use Helpers::Logger;
+
+our $logger = undef;
+
+{
+
+  our $opt = {
+                'TOOL_NAME'       => qq(url-2-file),
+                'TOOL_DESC'       => qq(Stores content of the URL in a file),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 1,
+                'url'             => undef,
+                'target_file'     => undef,
+                'target_mode'     => qq(0644),
+                'polling_delay'   => 10,
+                'max_retries'     => 6000,
+                '404_return'      => 1,
+                'verbose'         => 0,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  my $ret = GetOptions(   "url=s"           => \$opt->{'url'},
+                          "target-file=s"   => \$opt->{'target_file'},
+                          "polling-delay=i" => \$opt->{'polling_delay'},
+                          "target-mode=s"   => \$opt->{'target_mode'},
+                          "max-retries=i"   => \$opt->{'max_retries'},
+                          "verbose"         => \$opt->{'verbose'},
+                          "help"            => \$opt->{'help'},
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $loggerConfig =  {
+                          'ident' => $opt->{'TOOL_NAME'},
+                          'loggers' => {
+                                          'syslog' => {
+                                                      },
+                                          'stdout' => 0,
+                                          'stderr' => 1,
+                                       },
+                      };
+
+  Helpers::Misc::display_and_exit(-1, qq(Need a source URL)) if (Helpers::Misc::isEmpty($opt->{'url'}));
+  Helpers::Misc::display_and_exit(-1, qq(Need a name of the target_file)) if (Helpers::Misc::isEmpty($opt->{'target_file'}));
+
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  my $data = undef;
+  ($ret, $data) = get_url_data($opt->{'url'});
+  Helpers::Misc::display_and_exit(-1, qq(Failed to fetch data from url %s: %s), $opt->{'url'}, $data) if (!$ret);
+  Heleprs::Misc::display_and_exit(0, qq(Received 404 from %s. Not updating file %s), $opt->{'url'}, $opt->{'target_file'}) if (!defined $data);
+
+  my $r = undef;
+  ($ret, $r) = Helpers::Misc::writeFile($opt->{'target_file'}, $data, { 'mode' => $opt->{'target_mode'} });
+  Helpers::Misc::display_and_exit(-1, qq(Failed to write data fetched from url %s to %s: %s), $opt->{'url'}, $opt->{'target_file'}, $r) if (!$ret);
+
+  Helpers::Misc::display_and_exit(0, qq(Wrote data fetched from %s to %s), $opt->{'url'}, $opt->{'target_file'});
+
+}
+
+exit(0);
+
+sub get_url_data {
+
+  my $url = shift @_;
+
+  my $l = $main::logger;
+  my $result = undef;
+  for(my $retry_count = 1; $retry_count <= $main::opt->{'max_retries'}; $retry_count++)
+    {
+      my $ua = LWP::UserAgent->new();
+      $ua->agent($main::opt->{'TOOL_FULL_ID'});
+      my $req = HTTP::Request->new( qq(GET) => $url );
+
+      my $res = $ua->request($req);
+      if ($res->code eq qq(404))
+        {
+          return (1, undef) if ($main::opt->{'404_return'} == 1)
+        }
+      if ($res->code ne qq(200))
+        {
+          $l->log("Sleeping %s seconds and making attempt number %s", $main::opt->{'polling_delay'}, $retry_count);
+          sleep($main::opt->{'polling_delay'});
+          next;
+        }
+      $result = $res->decoded_content();
+      last;
+    }
+  return (1, $result);
+}
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --url=<url>           Pull data from url <url>\n");
+  printf("                            Default: %s\n", $opt->{'url'});
+  printf("      --target-file=<file>> Store the content of the URL in file <file>\n");
+  printf("                            Default: %s\n", $opt->{'target_file'});
+  printf("      --target-mode=<mode>  After writing, change file mode to <mode>\n");
+  printf("                            Default: %s\n", $opt->{'target_mode'});
+  printf("      --max-retries=<count> If failed, retry at most <count> times\n");
+  printf("                            Default: %s\n", $opt->{'max_retries'});
+  printf("      --polling-delay=<s>   Upon failure, wait <s> seconds before retrying\n");
+  printf("                            Default: %s\n", $opt->{'polling_delay'});
+  printf("      --help                This help\n");
+
+  exit(0);
+
+}
