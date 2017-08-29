@@ -5,7 +5,7 @@
 # Edits AWS EC2 security group
 # Requires configured aws tool
 #
-# Version 0.0.3
+# Version 0.0.4
 
 use strict;
 use warnings;
@@ -31,6 +31,7 @@ BEGIN
 }
 
 use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::AWS;
 use Helpers::Misc;
 
 use constant ERR_MSG_MISSING_SECGRPID_AND_NAME => qq(Must provide a security group name or security group id);
@@ -42,7 +43,7 @@ use constant ERR_MSG_INVALID_IPV4_CIDR         => qq(Must provide a valid IPv4 C
 use constant ERR_MSG_EC2_SECGROUP_MUST_EXIST   => qq(Security group %s must already exist);
 use constant ERR_MSG_EC2_NO_SEC_GROUP_DATA     => qq(Failed to get crunched security group data from AWS: );
 use constant ERR_MSG_EC2_SEC_DATA_NOT_JSON     => qq(AWS security group data does not appear to be JSON: );
-use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy allow connections to port %s protocol %s from %s to security group %s);
+use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy to allow connections to port %s protocol %s from %s to security group %s);
 
 {
 
@@ -51,8 +52,9 @@ use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy allow c
                 'TOOL_DESC'       => qq(Manipulate a single rule in an existing AWS EC2 security group),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 3,
+                'TOOL_VER_PATCH'  => 4,
                 'command'         => undef,
+                'region'          => undef,
                 'group_name'      => undef,
                 'group_id'        => undef,
                 'protocol'        => undef,
@@ -66,6 +68,7 @@ use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy allow c
   my $ret = GetOptions(   "group-name=s"  => \$opt->{'group_name'},
                           "group-id=s"    => \$opt->{'group_id'},
                           "command=s"     => \$opt->{'command'},
+                          "region=s"      => \$opt->{'region'},
                           "protocol=s"    => \$opt->{'protocol'},
                           "port=s"        => \$opt->{'port'},
                           "cidr=s"        => \$opt->{'cidr'},
@@ -77,13 +80,15 @@ use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy allow c
   Helpers::Misc::display_and_exit(-1, ERR_MSG_CANTMIX_SECGRPID_AND_NAME) if (!Helpers::Misc::isEmpty($opt->{'group_name'}) && !Helpers::Misc::isEmpty($opt->{'group_id'}));
   if ($opt->{'group_name'}) { $opt->{'group_txt'} = $opt->{'group_txt'}; } else { $opt->{'group_txt'} = $opt->{'group_id'}; }
 
+  Helpers::Misc::display_and_exit(-1, qq(Need a valid AWS region)) if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
+
   Helpers::Misc::display_and_exit(-1, ERR_MSG_INVALID_COMMAND)     if (!isValidCommand($opt->{'command'}));
   Helpers::Misc::display_and_exit(-1, ERR_MSG_INVALID_PROTOCOL)    if (!isValidIpProtocol($opt->{'protocol'}));
   Helpers::Misc::display_and_exit(-1, ERR_MSG_INVALID_PORT_NUMBER) if (!Helpers::Misc::isValidPortNumber($opt->{'port'}));
   Helpers::Misc::display_and_exit(-1, ERR_MSG_INVALID_IPV4_CIDR)   if (!Helpers::Misc::isValidIpv4CIDR($opt->{'cidr'}));
 
   my $response_ptr = undef;
-  ($ret, $response_ptr) = Helpers::Misc::readFile("aws-list-ec2-sec-groups|");
+  ($ret, $response_ptr) = Helpers::Misc::readFile("aws-list-ec2-sec-groups --region=" . $opt->{'region'} . qq(|));
   Helpers::Misc::display_and_exit(-1, ERR_MSG_EC2_NO_SEC_GROUP_DATA . $response_ptr) if (!$ret);
 
   my $sec_groups_list = undef;
@@ -102,14 +107,23 @@ use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy allow c
       $found = 1;
       last;
     }
-  Helpers::Misc::display_and_exit(-1, sprintf(ERR_MSG_EC2_SECGROUP_MUST_EXIST, $opt->{'group_txt'})) if (!$found);
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_EC2_SECGROUP_MUST_EXIST, $opt->{'group_txt'}) if (!$found);
 
-  my $cmd = undef;
-  my $mode_str = qq(authorize-security-group-ingress); $mode_str = qq(revoke-security-group-ingress) if ($opt->{'command'} eq qq(remove));
-  $cmd = sprintf("aws ec2 %s --group-id %s --protocol %s --port %s --cidr %s", $mode_str, $opt->{'group_id'}, $opt->{'protocol'}, $opt->{'port'}, $opt->{'cidr'});
+  my $actions = {
+                  'add'     => qq(authorize-security-group-ingress),
+                  'remove'  => qq(revoke-security-group-ingress),
+                };
+
+  my $cmd = '';
+  $cmd .= qq(aws ec2 ) . $actions->{$opt->{'command'}};
+  $cmd .= qq( --region )   . $opt->{'region'};
+  $cmd .= qq( --group-id ) . $opt->{'group_id'};
+  $cmd .= qq( --protocol ) . $opt->{'protocol'};
+  $cmd .= qq( --port )     . $opt->{'port'};
+  $cmd .= qq( --cidr )     . $opt->{'cidr'};
 
   $ret = system($cmd);
-  Helpers::Misc::display_and_exit(-1, sprintf(ERR_MSG_POLICY_CHANGE_FAILED, $mode_str, $opt->{'port'}, $opt->{'protocol'}, $opt->{'cidr'}, $opt->{'group_id'})) if ($ret != 0);
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_POLICY_CHANGE_FAILED, $opt->{'command'}, $opt->{'port'}, $opt->{'protocol'}, $opt->{'cidr'}, $opt->{'group_id'}) if ($ret != 0);
 
   exit(0);
 }
@@ -141,8 +155,9 @@ sub display_help_and_exit
 
   printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
   printf("Options:\n\n");
-  printf("      --group-id=<id>        Manipulate security group with id  <id>\n");
-  printf("      --group-name=<name>    Manipulate security group with name <name>\n");
+  printf("      --group-id=<id>        Manipulate a security group with id  <id>\n");
+  printf("      --group-name=<name>    Manipulate a security group with name <name>\n");
+  printf("      --region=<region>      Manipulate a security group in a region <region>\n");
   printf("      --command=<command>    <command> to execute on a security group\n");
   printf("                             'add' -    adds a new rule\n");
   printf("                             'remove' - removes an existing rule\n");
