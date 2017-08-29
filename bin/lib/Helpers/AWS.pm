@@ -13,7 +13,7 @@ use JSON;
 use Helpers::Misc;
 
 BEGIN {
-  our $VERSION = "0.04";
+  our $VERSION = "0.05";
 }
 
 
@@ -69,7 +69,8 @@ sub isValidHostname
   return 0;
 }
 
-sub isValidAWSUsername{
+sub isValidAWSUsername
+{
   my $username = shift @_;
 
   return 0 if (Helpers::Misc::isEmpty($username));
@@ -78,7 +79,8 @@ sub isValidAWSUsername{
   return 0;
 }
 
-sub isValidAWSUserPath{
+sub isValidAWSUserPath
+{
   my $path = shift @_;
 
   return 0 if (Helpers::Misc::isEmpty($path));
@@ -115,7 +117,6 @@ sub getInstanceIds
   return undef if (!defined $obj);
 
   my @ids = ();
-
   foreach my $this_instance (@{$obj->{'Instances'}})
     {
       push @ids, $this_instance->{'InstanceId'};
@@ -124,21 +125,24 @@ sub getInstanceIds
   return \@ids;
 }
 
-sub isValidAWSRegion {
+sub getAllAWSRegions {
+  return keys %{$AWS_EC2_REGIONS};
+}
+
+sub isValidAWSRegion
+{
   my $region = shift @_;
 
   return undef if (!defined $region);
-
   return 1 if (defined $AWS_EC2_REGIONS->{$region});
   return 0;
 }
 
-sub azToRegion {
-
+sub azToRegion
+{
   my $az = shift @_;
 
   return undef if (!defined $az);
-
   foreach my $r (keys %$AWS_EC2_REGIONS)
     {
       return $r if ($az =~ m/^$r/)
