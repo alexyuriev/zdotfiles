@@ -5,7 +5,7 @@
 # Sets policy AWS EC2 security group based on JSON file
 # Requires configured aws tool
 #
-# Version 0.0.4
+# Version 0.0.5
 
 use strict;
 use warnings;
@@ -41,7 +41,7 @@ use Helpers::Misc;
                 'TOOL_DESC'       => qq(Sets AWS EC2 security group to a specific policy),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 4,
+                'TOOL_VER_PATCH'  => 5,
                 'command'         => undef,
                 'group_name'      => undef,
                 'group_id'        => undef,
@@ -68,10 +68,10 @@ use Helpers::Misc;
 
   Helpers::Misc::display_and_exit(-1, qq(Need a valid AWS region)) if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
 
-  Helpers::Misc::display_and_exit(-1, qq(Either JSON policy file name or --json for stdin policy must be present))   if (!$opt->{'json_file'} ||  Helpers::Misc::isEmpty($opt->{'json_file'}));
-  Helpers::Misc::display_and_exit(-1, qq(Only one JSON policy file name or --json for stdin policy must be present)) if ( $opt->{'json_file'} || !Helpers::Misc::isEmpty($opt->{'json_file'}));
+  Helpers::Misc::display_and_exit(-1, qq(Either JSON policy file name or --json for stdin policy must be present))   if (!$opt->{'json_file'} && !$opt->{'json'});
+  Helpers::Misc::display_and_exit(-1, qq(Only one JSON policy file name or --json for stdin policy must be present)) if ( $opt->{'json_file'} &&  $opt->{'json'});
 
-  my $source_txt = qq(STDIN); $source_txt = qq(file ) . $opt->{'json_file'} if (!Help::Misc::isEmpty($opt->{'json_file'}));
+  my $source_txt = qq(STDIN); $source_txt = qq(file ) . $opt->{'json_file'} if (!Helpers::Misc::isEmpty($opt->{'json_file'}));
 
   my $policy_ptr = undef;
   ($ret, $policy_ptr) = Helpers::Misc::readFile($opt->{'json_file'});
@@ -79,7 +79,7 @@ use Helpers::Misc;
 
   my $policy_obj = undef;
   ($ret, $policy_obj) = Helpers::Misc::fromJSON($$policy_ptr);
-  Helpers::Misc::display_and_exit(-1, qq(Content of %s policy file does not appear to be a JSON: %s), $opt->{'json_file'}, $policy_obj) if (!$ret);
+  Helpers::Misc::display_and_exit(-1, qq(Content of policy from %s does not appear to be a JSON: %s), $source_txt, $policy_obj) if (!$ret);
   Helpers::Misc::display_and_exit(-1, qq(Missing sec_fencer->incoming_allow in the policy JSON)) if (!defined $policy_obj->{'sec_fencer'} || !defined $policy_obj->{'sec_fencer'}->{'incoming_allow'});
 
   my $group_opt = undef;
@@ -89,7 +89,7 @@ use Helpers::Misc;
 
   my $sec_group_rules = undef;
   ($ret, $sec_group_rules) = sec_fencer_get_group_rules($group_opt);
-  Helpers::Misc::display_and_exit(-1, qq(Failed to get crunched security group data from AWS: ), $response_ptr) if (!$ret);
+  Helpers::Misc::display_and_exit(-1, qq(Failed to get crunched security group data from AWS: %s), $sec_group_rules) if (!$ret);
 
   my $rule_number = 0;
   foreach my $this_rule (@{$policy_obj->{'sec_fencer'}->{'incoming_allow'}})
@@ -147,7 +147,7 @@ sub sec_fencer_rule_exists
       foreach my $key (keys %{$rule})
         {
           next if (!defined $policy_rule->{$key});
-          next if (!$policy_rule->{$key} ne $rule->{$key});
+          next if ($policy_rule->{$key} ne $rule->{$key});
           $match_count++;
         }
       return 1 if ($match_count == $max_match_count);
@@ -254,8 +254,12 @@ sub display_help_and_exit
   printf("                                   Default: %s\n", $opt->{'group_id'});
   printf("      --group-name=<name>          Set policy for security group <name>\n");
   printf("                                   Default: %s\n", $opt->{'group_name'});
+  printf("      --region=<region>            Set policy for security group in a region <region>\n");
+  printf("                                   Default: %s\n", $opt->{'region'});
   printf("      --policy-file=<policy.json>  Read security group policy from file <policy.json>\n");
   printf("                                   Default: %s\n", $opt->{'json_file'});
+  printf("      --json                       Use policy JSON from STDIN\n");
+  printf("                                   Default: no\n");
   printf("      --help                       This help\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
 
