@@ -11,7 +11,7 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.05";
+  our $VERSION = "0.06";
 }
 
 sub readFile
@@ -20,11 +20,13 @@ sub readFile
   my $txt = '';
   my $ret = 0;
 
-  my $fh = FileHandle->new($fname);
+  my $fh = undef;
+  if (!Helpers::Misc::isEmpty($fname)) { $fh = FileHandle->new($fname); } else { $fh = *STDIN; }
+
   if (defined $fh)
     {
       while (my $line = <$fh>) { $txt .= $line; }
-      $fh->close();
+      $fh->close() if (!Helpers::Misc::isEmpty($fname));
       $ret = 1;
     }
   return ($ret, \$txt) if ($ret);
