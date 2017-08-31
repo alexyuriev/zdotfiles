@@ -8,3 +8,4 @@ Just some useful dotfiles and non-dot files
                        in a modern system
 * batcheck              - Show status of battery
 * take-screenshot	      - Takes a screenshot of a section of the screen
+* .Xresources - Basic X11 customization for Xterm & Xft
