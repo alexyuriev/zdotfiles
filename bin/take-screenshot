@@ -1,0 +1,11 @@
+#!/bin/bash
+
+SCREENSHOTDIR=Screenshots
+NAMEPREFIX=Screenshot-
+SDIR="$HOME/$SCREENSHOTDIR"
+WHEN=`date "+%F_%T_%Z"`
+
+if [ ! -d "$SDIR" ]; then
+	mkdir $SDIR
+fi
+gnome-screenshot -a -f "$SDIR/$NAMEPREFIX$WHEN"
