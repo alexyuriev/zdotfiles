@@ -4,8 +4,10 @@ SCREENSHOTDIR=Screenshots
 NAMEPREFIX=Screenshot-
 SDIR="$HOME/$SCREENSHOTDIR"
 WHEN=`date "+%F_%T_%Z"`
+SHOTFILE="$SDIR/$NAMEPREFIX$WHEN"
 
 if [ ! -d "$SDIR" ]; then
 	mkdir $SDIR
 fi
-gnome-screenshot -a -f "$SDIR/$NAMEPREFIX$WHEN"
+gnome-screenshot -a -f "$SHOTFILE"
+qiv "$SHOTFILE"
