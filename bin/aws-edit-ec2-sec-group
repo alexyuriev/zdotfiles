@@ -5,7 +5,7 @@
 # Edits AWS EC2 security group
 # Requires configured aws tool
 #
-# Version 0.0.4
+# Version 0.0.5
 
 use strict;
 use warnings;
@@ -52,7 +52,7 @@ use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy to allo
                 'TOOL_DESC'       => qq(Manipulate a single rule in an existing AWS EC2 security group),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 4,
+                'TOOL_VER_PATCH'  => 5,
                 'command'         => undef,
                 'region'          => undef,
                 'group_name'      => undef,
@@ -85,7 +85,7 @@ use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy to allo
   Helpers::Misc::display_and_exit(-1, ERR_MSG_INVALID_COMMAND)     if (!isValidCommand($opt->{'command'}));
   Helpers::Misc::display_and_exit(-1, ERR_MSG_INVALID_PROTOCOL)    if (!isValidIpProtocol($opt->{'protocol'}));
   Helpers::Misc::display_and_exit(-1, ERR_MSG_INVALID_PORT_NUMBER) if (!Helpers::Misc::isValidPortNumber($opt->{'port'}));
-  Helpers::Misc::display_and_exit(-1, ERR_MSG_INVALID_IPV4_CIDR)   if (!Helpers::Misc::isValidIpv4CIDR($opt->{'cidr'}));
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_INVALID_IPV4_CIDR)   if (!Helpers::Misc::isValidIpV4CIDR($opt->{'cidr'}));
 
   my $response_ptr = undef;
   ($ret, $response_ptr) = Helpers::Misc::readFile("aws-list-ec2-sec-groups --region=" . $opt->{'region'} . qq(|));
