@@ -11,7 +11,7 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.06";
+  our $VERSION = "0.07";
 }
 
 sub readFile
@@ -20,42 +20,95 @@ sub readFile
   my $txt = '';
   my $ret = 0;
 
+  my $fname_txt = $fname;
+
   my $fh = undef;
-  if (!Helpers::Misc::isEmpty($fname)) { $fh = FileHandle->new($fname); } else { $fh = *STDIN; }
+  my $is_stdin = 0;
+  if (!Helpers::Misc::isEmpty($fname))
+    {
+      $fh = FileHandle->new($fname);
+    }
+  else
+    {
+      $fh = *STDIN;
+      $is_stdin = 1;
+    }
 
   if (defined $fh)
     {
       while (my $line = <$fh>) { $txt .= $line; }
-      $fh->close() if (!Helpers::Misc::isEmpty($fname));
+      $fh->close() if (!$is_stdin);
       $ret = 1;
     }
   return ($ret, \$txt) if ($ret);
-  return ($ret, qq(Can't open $fname));
+  return ($ret, qq(Can't open $fname_txt));
 }
+
+#    FUNCTION: ($ret, $r) = writeFile($fname, $text, $opts)
+#
+# DESCRIPTION: Writes $text into a file $fname. Support STDOUT and write pipes
+#
+#       INPUT: $fname  - file name of the file to write to.
+#                        If $fname is not defined, then we write to stdout
+#                        If $fname starts with |, we presume it is a pipe
+#              $text   - Content to write to $fname
+#              $opt    - Optional argument hash:
+#                        $opt->{'mode'} - chmod file to this permission.
+#                        Applicable only to regular files. Failure to change
+#                        mode upon opening causes an attempt to delete the file
+#                        and always returns error to the caler
+#      OUTPUT: $ret    - Result code
+#                        1 -- Success
+#                        0 -- Failure
 
 sub writeFile
 {
   my $fname = shift @_;
-  my $txt = shift @_;
-  my $opt = shift @_;
+  my $txt   = shift @_;
+  my $opt   = shift @_;
 
-  return (0, qq(File name not defined)) if (isEmpty($fname));
+  my $fname_txt = $fname;
 
-  my $fhw = FileHandle->new($fname, "w");
-  return (0, qq(Failed to open file $fname for writing)) if (!defined $fhw);
-  if (defined $opt && defined $opt->{'mode'})
+  # if we pass "w" to FileHandle->new() to indicate write, we can't pipe write!
+  # so workaround it.
+
+  my $is_pipe = 0;
+  my $is_stdout = 0;
+  my $fhw = undef;
+
+  if (!Helpers::Misc::isEmpty($fname))
+    {
+      if ( $fname =~ m/^\|/)
+        {
+          $fhw = FileHandle->new($fname);
+          $is_pipe = 1;
+        }
+      else
+        {
+          $fhw = FileHandle->new($fname, "w");
+      }
+    }
+  else
+    {
+      $fhw = *STDOUT;
+      $is_stdout = 1;
+      $fname_txt = qq(STDOUT);
+    }
+  return (0, qq(Failed to open file $fname_txt for writing)) if (!defined $fhw);
+
+  if (!$is_pipe && !$is_stdout && defined $opt && defined $opt->{'mode'})
     {
       my $count = chmod $opt->{'mode'}, $fname;
       if (!$count)
         {
           $fhw->close();
           $count = unlink $fname;
-          return (0, qq(Failed to set mode of $fname to ) . $opt->{'mode'} . qq( and failed to delete the file. This is bad)) if (!$count);
-          return (0, qq(Failed to set mode of $fname to ) . $opt->{'mode'} . qq( so it is deleted));
+          return (0, qq(Failed to set mode of $fname_txt to ) . $opt->{'mode'} . qq( and failed to delete the file. This is bad)) if (!$count);
+          return (0, qq(Failed to set mode of $fname_txt to ) . $opt->{'mode'} . qq( so it is deleted));
         }
     }
   $fhw->print($txt);
-  $fhw->close();
+  $fhw->close() if (!$is_stdout);
   return (1, qq(OK));
 }
 
@@ -153,7 +206,7 @@ sub isValidPortNumber
   return 1;
 }
 
-sub isValidIpv4CIDR
+sub isValidIpV4CIDR
 {
   my $cidr = shift @_;
 
