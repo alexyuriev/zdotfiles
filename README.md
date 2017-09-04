@@ -9,3 +9,4 @@ Just some useful dotfiles and non-dot files
 * batcheck              - Show status of battery
 * take-screenshot	      - Takes a screenshot of a section of the screen
 * .Xresources - Basic X11 customization for Xterm & Xft
+* show-my-external-ipv4 - ask Google's DNS for our public IPv4 address
