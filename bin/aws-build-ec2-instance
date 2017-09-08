@@ -5,7 +5,7 @@
 # Launches instance from the AMI
 # Requires configured aws tool
 #
-# Version 0.0.1
+# Version 0.0.2
 
 use strict;
 use warnings;
@@ -47,6 +47,7 @@ use constant ERR_CONFIG_NOT_JSON        => qq(Configuration file %s content does
 use constant ERR_MISSING_AMI_ID         => qq(Must provide a valid AMI id);
 use constant ERR_MISSING_HOSTNAME       => qq(Must provide a valid hostname);
 use constant ERR_MISSING_INSTANCE_TYPE  => qq(Must provide a valid instance type);
+use constant ERR_MISSING_REGION         => qq(Must provide a valid AWS EC2 region);
 use constant ERR_CMD_NO_INSTANCES       => qq(Failed to get a current list of instances);
 use constant ERR_EC2_AWS_FAILURE        => qq(Failed to properly communicated with AWS to create an instance);
 use constant ERR_EC2_AWS_NO_JSON        => qq(AWS API responded with something other than a JSON);
@@ -66,6 +67,7 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
                 'default_config'          => Helpers::Misc::get_users_home_dir() . qq(/.config/config-aws-helpers.json),
                 'ami_id'                  => undef,
                 'instance_type'           => undef,
+                'region'                  => undef,
                 'default_sg'              => undef,
                 'aws_fetch_sleep'         => 60,
                 'aws_fetch_max_attempts'  => 60,
@@ -81,6 +83,7 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
 
   my $ret = GetOptions(   "config=s"          => \$opt->{'config'},
                           "ami-id=s"          => \$opt->{'ami_id'},
+                          "region=s"          => \$opt->{'region'},
                           "intance-type=s"    => \$opt->{'instance_type'},
                           "hostname=s"        => \$opt->{'hostname'},
                           "sec-fencer-build"  => \$opt->{'sec_fencer_build'},
@@ -107,7 +110,7 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
       $config = $this_config->{'aws-ec2-builder'};
     }
 
-  foreach my $f (qw/ami_id hostname instance_type security_group sec_fencer_build/)
+  foreach my $f (qw/ami_id hostname instance_type security_group sec_fencer_build region/)
     {
       $config->{$f} = $opt->{$f} if (!Helpers::Misc::isEmpty($opt->{$f}));
     }
@@ -115,6 +118,7 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
   Helpers::Misc::display_and_exit(-1, ERR_MISSING_AMI_ID)        if (!Helpers::AWS::isValidAMI($config->{'ami_id'}));
   Helpers::Misc::display_and_exit(-1, ERR_MISSING_HOSTNAME)      if (!Helpers::AWS::isValidHostname($config->{'hostname'}));
   Helpers::Misc::display_and_exit(-1, ERR_MISSING_INSTANCE_TYPE) if (!Helpers::AWS::isValidInstanceType($config->{'instance_type'}));
+  Helpers::Misc::display_and_exit(-1, ERR_MISSING_REGION)        if (!Helpers::AWS::isValidAWSRegion($config->{'region'}));
 
   printf("Getting information about the running instances...\n") if ($opt->{'verbose'});
   my $instance_list_json_ptr = undef;
@@ -147,6 +151,7 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
 
   $cmd  = qq(aws ec2 run-instances);
   $cmd .= qq( --count 1);
+  $cmd .= qq( --region ) . $config->{'region'};
   $cmd .= qq( --security-group-ids ) . $config->{'security_group'};
   $cmd .= qq( --image-id ) . $config->{'ami_id'};
   $cmd .= qq( --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=) . $opt->{'hostname'} . qq(}]');
@@ -154,8 +159,6 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
   $cmd .= qq( --user-data $user_data_base64) if ($config->{'sec_fencer_build'});
 
   printf("Building and running a new instance with type %s with hostname %s\n", $config->{'instance_type'}, $opt->{'hostname'}) if ($opt->{'verbose'});
-
-  print "cmd = $cmd\n";
 
   my $response_ptr = undef;
   ($ret, $response_ptr) = Helpers::Misc::readFile("$cmd|");
@@ -181,12 +184,9 @@ use constant ERR_HOSTNAME_EXISTS        => qq(Selected hostname is already assig
   my $instance_json = undef;
   ($ret, $instance_json) = Helpers::Misc::toJSON($launched_instance, { 'pretty' => 1 });
   printf("%s\n", $instance_json);
-
 }
 
 exit(0);
-
-
 
 sub display_help_and_exit
 {
@@ -212,5 +212,4 @@ sub display_help_and_exit
   printf("This tool relies on pre-configured aws utility\n\n");
 
   exit(0);
-
 }
