@@ -3,20 +3,27 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = 0.04;
+  our $VERSION = 0.05;
 }
 
 use Sys::Syslog qw(:standard :macros);
 use Helpers::Misc;
 
-sub new {
+use constant HTTP_STATUS_LOGGER_IMPOSSIBLE_CODE => 588;
+use constant HTTP_STATUS_LOGGER_UNSET_CODE      => 587;
+use constant HTTP_STATUS_LOGGER_UNKNOWN_CODE    => 589;
+
+sub new
+{
   my $class = shift @_;
   my $opt = shift @_;
 
   my $self =  {
-                'syslog' => 0,
-                'stdout' => 0,
-                'stderr' => 1,
+                'syslog'      => 0,
+                'stdout'      => 0,
+                'stderr'      => 1,
+                'stdout_json' => 0,
+                'json_status' => HTTP_STATUS_LOGGER_UNSET_CODE,
               };
   return undef if (!defined $opt);
 
@@ -31,7 +38,7 @@ sub new {
       openlog($self->{'ident'}, qq(nofatal,pid), $facility);
       $self->{'syslog'} = 1;
     }
-  foreach my $this_logger ( qw/stdout stderr/)
+  foreach my $this_logger ( qw/stdout stderr stdout_json/)
     {
       $self->{$this_logger} = $opt->{'loggers'}->{$this_logger} if (defined $opt->{'loggers'}->{$this_logger});
     }
@@ -39,7 +46,34 @@ sub new {
   return bless $self, $class;
 }
 
-sub log {
+sub status
+{
+  my $self = shift @_;
+  my $status = shift @_;
+
+  if (defined $status)
+    {
+      if (!Helpers::Misc::isUnsignedInteger($status))
+        {
+          $self->{'json_status'} = HTTP_STATUS_LOGGER_IMPOSSIBLE_CODE;
+        }
+      else
+        {
+          if ($status =~ m/^(200|503)$/)
+            {
+              $self->{'json_status'} = $status;
+            }
+          else
+            {
+              $self->{'json_status'} = HTTP_STATUS_LOGGER_UNKNOWN_CODE;
+            }
+        }
+    }
+  return $self->{'json_status'};
+}
+
+sub log
+{
   my $self = shift @_;
   my $msg = shift @_;
 
@@ -51,6 +85,17 @@ sub log {
   my $msg_ident = sprintf("%s[%s]: %s\n", $self->{'ident'}, $$, $assembled_msg);
 
   syslog('info', $assembled_msg) if ($self->{'syslog'});
+
+
+  if ($self->{'stdout_json'})
+    {
+      my $status_obj =  {
+                          'staus' => $self->{'status'},
+                          'msg'   => $assembled_msg,
+                        };
+      my ($ret, $json_msg) = Helpers::Misc::toJSON($status_obj);
+      print STDOUT $json_msg;
+    }
   print STDOUT $msg_ident if ($self->{'stdout'});
   print STDERR $msg_ident if ($self->{'stderr'});
 }
