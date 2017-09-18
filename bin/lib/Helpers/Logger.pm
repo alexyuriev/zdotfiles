@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = 0.05;
+  our $VERSION = 0.06;
 }
 
 use Sys::Syslog qw(:standard :macros);
@@ -46,6 +46,27 @@ sub new
   return bless $self, $class;
 }
 
+sub loggers {
+  my $self = shift @_;
+
+  my $opt = shift @_;
+
+  my @loggers = qw/syslog stdout stderr stdout_json/;
+  if (defined $opt)
+    {
+      foreach my $this_logger (@loggers)
+        {
+          $self->{$this_logger} = $opt->{$this_logger} if (defined $opt->{$this_logger})
+        }
+    }
+  my $k = undef;
+  foreach my $this_logger (@loggers)
+    {
+      $k->{$this_logger} = $self->{$this_logger};
+    }
+  return $k;
+}
+
 sub status
 {
   my $self = shift @_;
@@ -72,6 +93,27 @@ sub status
   return $self->{'json_status'};
 }
 
+sub log_no_stdout
+{
+  my $self = shift @_;
+
+  my @loggers_stdout = qw/stdout stdout_json/;
+  my $stdout_loggers = undef;
+
+  my $saved_loggers = $self->loggers;
+  foreach my $f (@loggers_stdout)
+    {
+      $stdout_loggers->{$f} = $saved_loggers->{$f};
+      $saved_loggers->{$f} = 0;
+    }
+  $self->loggers($saved_loggers);
+  $self->log(@_);
+  foreach my $f (@loggers_stdout)
+    {
+      $saved_loggers->{$f} = $stdout_loggers->{$f};
+    }
+}
+
 sub log
 {
   my $self = shift @_;
@@ -86,11 +128,10 @@ sub log
 
   syslog('info', $assembled_msg) if ($self->{'syslog'});
 
-
   if ($self->{'stdout_json'})
     {
       my $status_obj =  {
-                          'staus' => $self->{'status'},
+                          'status' => $self->status,
                           'msg'   => $assembled_msg,
                         };
       my ($ret, $json_msg) = Helpers::Misc::toJSON($status_obj);
