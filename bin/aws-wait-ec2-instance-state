@@ -1,0 +1,178 @@
+#!/usr/bin/perl
+
+# aws-wait-ec2-instance-state
+#
+# Security Fencer AWS waiter
+# Requires configured aws tool
+#
+# Version 0.0.4
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+
+use Helpers::AWS;
+use Helpers::Misc;
+use Helpers::Logger;
+
+use constant ERR_MSG_MISSING_INSTANCE_ID    => qq(Need an instance id);
+use constant ERR_MSG_MISSIGN_AWS_AZ         => qq(Need AWS availability zone.);
+use constant ERR_MSG_MISSING_AWS_RUN_STATE  => qq(Missing or invalid target AWS run state.);
+use constant MSG_INSTANCE_STATE_RESULT      => qq(Instance '%s' in AWS zone '%s" '%s' reached state '%s');
+use constant ERR_MSG_NO_STATE               => qq(Failed to get the state of instance '%s' in AWS zone '%s': %s);
+use constant MSG_WRONG_INSTANCE_STATE_RETRY => qq(Instance %s in zone %s has a run state '%s' instead of '%s' - retry number %s in %s seconds);
+
+our $logger = undef;
+
+{
+
+  my $opt = {
+                'TOOL_NAME'       => qq(aws-wait-ec2-instance-state),
+                'TOOL_DESC'       => qq(Waits until AWS instance readches a specific run state),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 4,
+                'instance_id'     => undef,
+                'region'          => undef,
+                'exit_state'      => undef,
+                'polling_delay'   => 5,
+                'max_tries'       => 1000,
+                'verbose'         => 0,
+                'stdout_json'     => 0,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'TOOL_EXEC'} = $0;
+
+  my $ret = GetOptions(   "instance-id=s"   => \$opt->{'instance_id'},
+                          "region=s"        => \$opt->{'region'},
+                          "exit-state=s"    => \$opt->{'exit_state'},
+                          "polling-delay=i" => \$opt->{'polling_delay'},
+                          "max-tries=s"     => \$opt->{'max_tries'},
+                          "verbose"         => \$opt->{'verbose'},
+                          "stdout-json"     => \$opt->{'stdout_json'},
+                          "help"            => \$opt->{'help'},
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSING_INSTANCE_ID)   if (Helpers::Misc::isEmpty($opt->{'instance_id'}));
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSIGN_AWS_AZ)        if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSING_AWS_RUN_STATE) if (!Helpers::AWS::isValidEC2InstanceRunState($opt->{'exit_state'}));
+
+  my $loggerConfig =  {
+                          'ident' => $opt->{'TOOL_NAME'},
+                          'loggers' => {
+                                          'stdout' => 0,
+                                          'stderr' => 1,
+                                       },
+                      };
+
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  my $cmd = sprintf("aws-list-ec2-instances --instance-id=%s --region=%s |", $opt->{'instance_id'}, $opt->{'region'});
+
+  my $run_state = qq(unknown);
+  my $state_reached = 0;
+  for ( my $try_number = 0; $try_number < $opt->{'max_tries'}; $try_number++)
+    {
+      my ($ret, $json_ptr) = Helpers::Misc::readFile($cmd);
+      if ($ret)
+        {
+          my $state = undef;
+
+          ($ret, $state) = Helpers::Misc::fromJSON($$json_ptr);
+          if (!$ret)
+            {
+              $logger->log(ERR_MSG_NO_STATE, $opt->{'instance_id'}, $opt->{'region'}, $state);
+            }
+          else
+            {
+              $run_state = $state->{'RunState'};
+              if ($state->{'RunState'} eq $opt->{'exit_state'})
+                {
+                  $state_reached = 1;
+                  last;
+                }
+            }
+        }
+      else
+        {
+          $logger->log(ERR_MSG_NO_STATE, $opt->{'instance_id'}, $opt->{'region'}, $json_ptr);
+        }
+      $logger->log( MSG_WRONG_INSTANCE_STATE_RETRY,
+                    $opt->{'instance_id'},
+                    $opt->{'region'},
+                    $run_state,
+                    $opt->{'exit_state'},
+                    $try_number + 1,
+                    $opt->{'polling_delay'});
+      sleep($opt->{'polling_delay'});
+    }
+
+  my $state_flag = "has not"; $state_flag = "has" if ($state_reached);
+  my $result_obj = { 'msg' => sprintf(MSG_INSTANCE_STATE_RESULT, $opt->{'instance_id'}, $opt->{'region'}, $state_flag, $run_state) };
+  if ($state_reached)
+    {
+      $result_obj->{'status'} = 200;
+      my $result_json = undef;
+      ($ret, $result_json) = Helpers::Misc::toJSON($result_obj);
+      print STDOUT $result_json;
+    }
+
+  $logger->log($result_obj->{'msg'});
+  exit(1) if (!$state_reached);
+  exit(0);
+}
+
+exit(0);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --instance-id=<id>     Wait for instance with instance id <id>\n");
+  printf("                             Default: %s\n", $opt->{'instance_id'});
+  printf("      --region=<region>      Wait for instance in region <region>\n");
+  printf("                             Default: %s\n", $opt->{'region'});
+  printf("      --exit-state=<state>   Wait until instance reaches state <state>\n");
+  printf("                             Default: %s\n", $opt->{'exit_state'});
+  printf("      --polling-delay=<s>    Wait for <s> seconds between polling AWS API\n");
+  printf("                             Default: %s\n", $opt->{'polling_delay'});
+  printf("      --max-tries=<count>    At most do <count> retries\n");
+  printf("                             Default: %s\n", $opt->{'max_tries'});
+  printf("      --stdout-json          Make stdout status messageing to be a control JSON\n");
+  printf("                             Default: No\n");
+  printf("      --help                 This help\n\n");
+  printf("This tool relies on pre-configured aws utility. It exists with code 0 if the state\n");
+  printf("is reached and 1 if the state is not reached\n\n");
+
+  exit(0);
+}
+
