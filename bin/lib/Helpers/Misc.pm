@@ -11,7 +11,7 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.07";
+  our $VERSION = "0.08";
 }
 
 sub readFile
@@ -171,7 +171,22 @@ sub display_and_exit
   $assembled_msg = '' if (Helpers::Misc::isEmpty($assembled_msg)); chomp $assembled_msg;
   $code = -1 if (Helpers::Misc::isEmpty($code));
 
-  my $l = $main::logger; if (defined $l) { $l->log("%s", $assembled_msg); } else { printf("%s\n", $assembled_msg); }
+  my $l = $main::logger;
+  if (defined $l)
+    {
+      my $t_table = {
+                      '0'   => qq(200),
+                      '1'   => qq(503),
+                      '-1'  => qq(500),
+                    };
+      my $json_code = qq(589); $json_code = $t_table->{'code'} if (defined $t_table);
+      $l->status($json_code);
+      $l->log("%s", $assembled_msg);
+    }
+  else
+    {
+      printf("%s\n", $assembled_msg);
+    }
 
   exit($code);
 }
