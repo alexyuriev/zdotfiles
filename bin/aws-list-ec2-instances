@@ -5,7 +5,7 @@
 # Extract useful information from aws ec2 describe instances
 # Requires configured aws tool
 #
-# Version 0.0.11
+# Version 0.0.12
 
 use strict;
 use warnings;
@@ -31,6 +31,7 @@ BEGIN
 }
 
 use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::Logger;
 use Helpers::Misc;
 use Helpers::AWS;
 
@@ -43,6 +44,9 @@ use constant ERR_EC2_MALFORMATTED_JSON         => qq(AWS EC2 instance list for r
 use constant ERR_EC2_NO_INSTANCES_IN_REGION    => qq(Failed to list instances in AWS EC2 region %s: %s);
 use constant ERR_EC2_MALFORMATTED_RESERVATIONS => qq(AWS EC2 instance list for region %s returned an incorrect JSON: Reservations[] field is missing or is not an array);
 use constant ERR_EC2_MALFORMATTED_INSTANCES    => qq(AWS EC2 instance list for region %s returned an incorrect JSON: Instance field for Reservation %s is missing or is not an array);
+
+our $logger = undef;
+
 {
 
   my $opt = {
@@ -50,12 +54,13 @@ use constant ERR_EC2_MALFORMATTED_INSTANCES    => qq(AWS EC2 instance list for r
                 'TOOL_DESC'       => qq(Lists AWS EC2 instances),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 11,
+                'TOOL_VER_PATCH'  => 12,
                 'regions'         => undef,
                 'instance_id'     => undef,
                 'hostname'        => undef,
                 'with_tags'       => 0,
                 'single_instance' => 0,
+                'stdout_json'     => 0,
                 'help'            => 0,
             };
 
@@ -66,10 +71,22 @@ use constant ERR_EC2_MALFORMATTED_INSTANCES    => qq(AWS EC2 instance list for r
                           "region=s"      => \$opt->{'regions'},
                           "instance-id=s" => \$opt->{'instance_id'},
                           "hostname=s"    => \$opt->{'hostname'},
+                          "stdout-json"   => \$opt->{'stdout_json'},
                           "help"          => \$opt->{'help'}
                       );
 
   display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $loggerConfig =  {
+                          'ident' => $opt->{'TOOL_NAME'},
+                          'loggers' => {
+                                          'stdout' => 0,
+                                          'stderr' => 1,
+                                       },
+                      };
+
+  $loggerConfig->{'loggers'}->{'stdout_json'} = 1 if ($opt->{'stdout_json'});
+  $logger = Helpers::Logger->new($loggerConfig);
 
   Helpers::Misc::display_and_exit(-1, ERR_MSG_ARGUMENT_CONFLICT) if (!Helpers::Misc::isEmpty($opt->{'instance_id'}) && !Helpers::Misc::isEmpty($opt->{'hostname'}));
   $opt->{'single_instance'} = 1 if (!Helpers::Misc::isEmpty($opt->{'instance_id'}) || !Helpers::Misc::isEmpty($opt->{'hostname'}));
@@ -161,13 +178,25 @@ use constant ERR_EC2_MALFORMATTED_INSTANCES    => qq(AWS EC2 instance list for r
         }
     }
 
+  my $ptr = undef;
   if (my $total_instances = scalar @all_instances)
     {
-      my ($resp, $ptr) = (undef, undef);
       if ($total_instances == 1 && $opt->{'single_instance'}) { $ptr = $all_instances[0]; } else { $ptr = \@all_instances; }
-      ($ret, $resp) = Helpers::Misc::toJSON($ptr, {'pretty' => 1 });
-      print $resp;
     }
+  my $result_obj = undef;
+  if ($opt->{'stdout_json'})
+    {
+      $result_obj->{'status'} = qq(200);
+      $result_obj->{'object'} = $ptr;
+    }
+  else
+    {
+      $result_obj = $ptr;
+    }
+  my $object_json = undef;
+  ($ret, $object_json) = Helpers::Misc::toJSON($result_obj, {'pretty' => 1 });
+  print $object_json;
+
   exit(0);
 }
 
@@ -190,6 +219,7 @@ sub display_help_and_exit
   printf("                         Default: all instances\n");
   printf("      --with-tags        Include all tags assigned to instances\n");
   printf("                         Default: no\n");
+  printf("      --stdout-json      Output results as a JSON - used for creating pipelines\n");
   printf("      --help             This help\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
 
