@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = 0.06;
+  our $VERSION = 0.07;
 }
 
 use Sys::Syslog qw(:standard :macros);
@@ -112,6 +112,7 @@ sub log_no_stdout
     {
       $saved_loggers->{$f} = $stdout_loggers->{$f};
     }
+  $self->loggers($saved_loggers);
 }
 
 sub log
