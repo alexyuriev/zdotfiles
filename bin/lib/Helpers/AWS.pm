@@ -13,7 +13,7 @@ use JSON;
 use Helpers::Misc;
 
 BEGIN {
-  our $VERSION = "0.05";
+  our $VERSION = "0.06";
 }
 
 
@@ -48,6 +48,7 @@ my $AWS_EC2_RUN_STATES =  {
                           };
 
 
+
 sub isValidAMI
 {
   my $ami = shift @_;
@@ -55,6 +56,16 @@ sub isValidAMI
 
   $ami =~ s/^ami-[[:xdigit:]]+$//g;
   return 1 if ($ami eq '');
+  return 0;
+}
+
+sub isValidSecurityGroup
+{
+  my $sg = shift @_;
+  return 0 if (Helpers::Misc::isEmpty($sg));
+
+  $sg =~ s/^sg-[[:xdigit:]]+$//g;
+  return 1 if ($sg eq '');
   return 0;
 }
 
