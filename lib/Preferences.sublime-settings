@@ -1,0 +1,9 @@
+{
+	"atomic_sale": true,
+	"color_scheme": "Packages/Color Scheme - Default/Monokai Bright.tmTheme",
+	"create_winwow_at_startup": true,
+	"dpi_scale": 2.0,
+	"font_size": 9,
+	"ensure_newline_at_eof_on_save": true,
+	"trim_trailing_white_space_on_save": true,
+}
