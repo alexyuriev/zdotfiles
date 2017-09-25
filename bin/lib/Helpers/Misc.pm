@@ -11,8 +11,22 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.08";
+  our $VERSION = "0.09";
 }
+
+#    FUNCTION: ($ret, $content_ptr) = readFile($fname)
+#
+# DESCRIPTION: Slurps content of file with a name $fname and returns it to the caller
+#
+#       INPUT: $fname         - Name of a file to read
+#                               If $fname is "empty" then the function reads from STDIN
+#       OUPUT: $ret           - return code
+#                               0 - failure, typically file not found or permission error
+#                                   $content_ptr is set to an error message
+#                               1 - success, $content_ptr is a reference to the content of the file
+#
+#              $content_ptr   - Reference to the content of the file or reference -1
+#
 
 sub readFile
 {
@@ -210,6 +224,18 @@ sub isInArray {
         }
     }
   return $ret;
+}
+
+sub deleteValueFromArray {
+  my $array_ptr = shift @_;
+  my $value = shift @_;
+
+  my @new_array = ();
+  foreach my $this_value (@$array_ptr)
+    {
+      push @new_array, $this_value if (!defined $value || $this_value ne $value);
+    }
+  return \@new_array;
 }
 
 sub isValidPortNumber
