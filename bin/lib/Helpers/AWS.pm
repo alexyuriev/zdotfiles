@@ -13,7 +13,7 @@ use JSON;
 use Helpers::Misc;
 
 BEGIN {
-  our $VERSION = "0.06";
+  our $VERSION = "0.07";
 }
 
 
@@ -119,6 +119,16 @@ sub isValidEC2InstanceRunState
   return 0;
 }
 
+sub isValidEC2InstanceId
+{
+  my $instance_id = shift @_;
+
+  return 0 if (Helpers::Misc::isEmpty($instance_id));
+  $instance_id =~ s/^i-//g;
+  $instance_id =~ s/^[[:xdigit:]]+$//g;
+  return 1 if ($instance_id eq '');
+  return 0;
+}
 # returns a pointer to a list of just instance Ids from AWS responses
 
 sub getInstanceIds
