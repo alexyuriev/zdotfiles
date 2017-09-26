@@ -1,11 +1,11 @@
 #!/usr/bin/perl
 
-# aws-iam-create-user
+# aws-create-iam-user
 #
 # Creates AWS user
 # Requires configured aws tool
 #
-# Version 0.0.2
+# Version 0.0.3
 
 use strict;
 use warnings;
@@ -43,11 +43,11 @@ use constant ERR_EC2_AWS_NO_JSON   => qq(AWS API responded with something other 
 {
 
   my $opt = {
-                'TOOL_NAME'       => qq(aws-iam-create-user),
+                'TOOL_NAME'       => qq(aws-create-iam-user),
                 'TOOL_DESC'       => qq(Creates AWS IAM user),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 2,
+                'TOOL_VER_PATCH'  => 3,
                 'uname_prefix'    => undef,
                 'username'        => undef,
                 'path_prefix'     => undef,
