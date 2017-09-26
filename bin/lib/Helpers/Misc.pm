@@ -11,7 +11,7 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.09";
+  our $VERSION = "0.10";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -193,7 +193,7 @@ sub display_and_exit
                       '1'   => qq(503),
                       '-1'  => qq(500),
                     };
-      my $json_code = qq(589); $json_code = $t_table->{'code'} if (defined $t_table);
+      my $json_code = qq(589); $json_code = $t_table->{$code} if (defined $t_table->{$code});
       $l->status($json_code);
       $l->log("%s", $assembled_msg);
     }
