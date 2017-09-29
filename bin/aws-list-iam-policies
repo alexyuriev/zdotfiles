@@ -1,0 +1,110 @@
+#!/usr/bin/perl
+
+# aws-list-iam-policies
+#
+# Extract useful information from AWS IAM policies
+# Requires configured aws tool
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::Misc;
+use Helpers::AWS;
+
+{
+
+  my $opt = {
+                'TOOL_NAME'             => qq(aws-list-iam-policies),
+                'TOOL_DESC'             => qq(Lists AWS IAM policies),
+                'TOOL_VER_MAJOR'        => 0,
+                'TOOL_VER_MINOR'        => 0,
+                'TOOL_VER_PATCH'        => 1,
+                'policy_name'           => undef,
+                'policy_arn'            => undef,
+                'sec_fencer'            => 0,
+                'help'                  => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  my $ret = GetOptions(
+                        "policy-name=s" => \$opt->{'policy_name'},
+                        "policy-arn=s"  => \$opt->{'policy_arn'},
+                        "help"          => \$opt->{'help'}
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+  $opt->{'single_policy'} = 1 if (!Helpers::Misc::isEmpty($opt->{'policy_arn'}) || !Helpers::Misc::isEmpty($opt->{'policy_name'}));
+
+  my $policy_list_ptr = undef;
+  ($ret, $policy_list_ptr) = Helpers::Misc::readFile("aws iam list-policies|");
+  Helpers::Misc::display_and_exit(-1, qq(Failed to fetch a list of security policies from AWS IAM: %s), $policy_list_ptr) if (!$ret);
+  Helpers::Misc::display_and_exit(-1, qq(List of AWS IAM security policies is empty. That's strange)) if (!defined $policy_list_ptr);
+
+  my $policies_ptr = undef;
+  ($ret, $policies_ptr) = Helpers::Misc::fromJSON($$policy_list_ptr);
+  Helpers::Misc::display_and_exit(-1, qq(AWS IAM policies list does not appear to be a JSON: %s), $policies_ptr) if (!$ret);
+  Helpers::Misc::display_and_exit(-1, qq(JSON object does not have Policies array as the top level element)) if (!defined $policies_ptr->{'Policies'});
+
+  my @all_policies = ();
+
+  foreach my $this_policy (@{$policies_ptr->{'Policies'}})
+    {
+      next if (!Helpers::Misc::isEmpty($opt->{'policy_name'}) && $opt->{'policy_name'} ne $this_policy->{'PolicyName'});
+      next if (!Helpers::Misc::isEmpty($opt->{'policy_arn'})  && $opt->{'policy_arn'}  ne $this_policy->{'Arn'});
+      push @all_policies, $this_policy;
+
+    }
+
+  if (my $total_policies = scalar @all_policies)
+    {
+      my $resp = undef;
+      my $ptr  = \@all_policies;
+      $ptr = $all_policies[0] if ($total_policies == 1 && $opt->{'single_policy'});
+      ($ret, $resp) = Helpers::Misc::toJSON($ptr, { 'pretty' => 1});
+      print $resp;
+    }
+  exit(0);
+}
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k (keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --policy-name=<name>  Display only entry for security policy <name>\n");
+  printf("                            Default: all known policies\n");
+  printf("      --policy-arn=<arn>    Display only entry for security policy with ARN <arn>\n");
+  printf("                            Default: all known policies\n");
+  printf("      --help                This help\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(0);
+
+}
