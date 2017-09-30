@@ -11,7 +11,7 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.10";
+  our $VERSION = "0.11";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -155,8 +155,12 @@ sub toJSON
   my $ptr = shift @_;
   my $opt = shift @_;
 
-  return (0, qq(Received an undef)) if (!defined $ptr);
-
+  my $undefok = 0; $undefok = 1 if (defined $opt && $opt->{'undef_ok'} eq "1");
+  if (!defined $ptr)
+    {
+      return (0, qq(Received an undef)) if (!$undefok);
+      return (1, qq({}));
+    }
   my $is_pretty = 0; if (defined $opt) { $is_pretty = 1 if (defined $opt->{'pretty'} && $opt->{'pretty'} eq "1"); }
 
   my $json = JSON->new->utf8->allow_nonref;
