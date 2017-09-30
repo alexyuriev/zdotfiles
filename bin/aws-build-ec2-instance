@@ -103,9 +103,6 @@ our $logger = undef;
   $loggerConfig->{'loggers'}->{'stdout_json'} = 1 if ($opt->{'stdout_json'});
   $logger = Helpers::Logger->new($loggerConfig);
 
-#  use Data::Dumper;
-#  print STDERR Dumper($logger);
-
   my $config_json_ptr = undef;
   ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
   if (!$ret) # opportunistically read configuration file - if default, it is not an error if it is missing, if specified, it is.
