@@ -2,10 +2,11 @@
 
 # aws-wait-ec2-instance-state
 #
-# Security Fencer AWS waiter
+# Waits until AWS EC2 instance reaches a specific state.
+# This tool is mostly used as a part of the Security Fencer instance orchestration
 # Requires configured aws tool
 #
-# Version 0.0.4
+# Version 0.0.5
 
 use strict;
 use warnings;
@@ -36,12 +37,15 @@ use Helpers::AWS;
 use Helpers::Misc;
 use Helpers::Logger;
 
-use constant ERR_MSG_MISSING_INSTANCE_ID    => qq(Need an instance id);
-use constant ERR_MSG_MISSIGN_AWS_AZ         => qq(Need AWS availability zone.);
+use constant ERR_MSG_MISSING_INSTANCE_ID    => qq(Need an AWS EC2 instance id);
+use constant ERR_MSG_MISSIGN_AWS_AZ         => qq(Need ab AWS EC2 availability zone.);
 use constant ERR_MSG_MISSING_AWS_RUN_STATE  => qq(Missing or invalid target AWS run state.);
-use constant MSG_INSTANCE_STATE_RESULT      => qq(Instance '%s' in AWS zone '%s" '%s' reached state '%s');
 use constant ERR_MSG_NO_STATE               => qq(Failed to get the state of instance '%s' in AWS zone '%s': %s);
-use constant MSG_WRONG_INSTANCE_STATE_RETRY => qq(Instance %s in zone %s has a run state '%s' instead of '%s' - retry number %s in %s seconds);
+use constant ERR_MSG_INSTANCE_NOT_FOUND     => qq(Instance '%s' in the AWS region '%s' cannot be found);
+use constant MSG_INSTANCE_STATE_RESULT      => qq(Instance '%s' in the AWS region '%s' %s reached state '%s');
+use constant MSG_WRONG_INSTANCE_STATE_RETRY => qq(Instance '%s' in the AWS region '%s' has a run state '%s' instead of '%s' - retry number %s in %s seconds);
+
+use constant CMD_AWS_EC2_GET_INSTANCE       => qq(aws-list-ec2-instances --instance-id=%s --region=%s |);
 
 our $logger = undef;
 
@@ -52,7 +56,7 @@ our $logger = undef;
                 'TOOL_DESC'       => qq(Waits until AWS instance readches a specific run state),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 4,
+                'TOOL_VER_PATCH'  => 5,
                 'instance_id'     => undef,
                 'region'          => undef,
                 'exit_state'      => undef,
@@ -64,7 +68,6 @@ our $logger = undef;
             };
 
   $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
-  $opt->{'TOOL_EXEC'} = $0;
 
   my $ret = GetOptions(   "instance-id=s"   => \$opt->{'instance_id'},
                           "region=s"        => \$opt->{'region'},
@@ -78,10 +81,6 @@ our $logger = undef;
 
   display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
 
-  Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSING_INSTANCE_ID)   if (Helpers::Misc::isEmpty($opt->{'instance_id'}));
-  Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSIGN_AWS_AZ)        if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
-  Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSING_AWS_RUN_STATE) if (!Helpers::AWS::isValidEC2InstanceRunState($opt->{'exit_state'}));
-
   my $loggerConfig =  {
                           'ident' => $opt->{'TOOL_NAME'},
                           'loggers' => {
@@ -89,10 +88,14 @@ our $logger = undef;
                                           'stderr' => 1,
                                        },
                       };
-
+  $loggerConfig->{'loggers'}->{'stdout_json'} = 1 if ($opt->{'stdout_json'});
   $logger = Helpers::Logger->new($loggerConfig);
 
-  my $cmd = sprintf("aws-list-ec2-instances --instance-id=%s --region=%s |", $opt->{'instance_id'}, $opt->{'region'});
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSING_INSTANCE_ID)   if (Helpers::Misc::isEmpty($opt->{'instance_id'}));
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSIGN_AWS_AZ)        if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
+  Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSING_AWS_RUN_STATE) if (!Helpers::AWS::isValidEC2InstanceRunState($opt->{'exit_state'}));
+
+  my $cmd = sprintf(CMD_AWS_EC2_GET_INSTANCE, $opt->{'instance_id'}, $opt->{'region'});
 
   my $run_state = qq(unknown);
   my $state_reached = 0;
@@ -101,12 +104,12 @@ our $logger = undef;
       my ($ret, $json_ptr) = Helpers::Misc::readFile($cmd);
       if ($ret)
         {
+          Helpers::Misc::display_and_exit(-1, ERR_MSG_INSTANCE_NOT_FOUND, $opt->{'instance_id'}, $opt->{'region'}) if (defined $json_ptr && $$json_ptr eq qq({})); # handle instance not found
           my $state = undef;
-
           ($ret, $state) = Helpers::Misc::fromJSON($$json_ptr);
           if (!$ret)
             {
-              $logger->log(ERR_MSG_NO_STATE, $opt->{'instance_id'}, $opt->{'region'}, $state);
+              $logger->log_no_stdout(ERR_MSG_NO_STATE, $opt->{'instance_id'}, $opt->{'region'}, $state);
             }
           else
             {
@@ -116,35 +119,35 @@ our $logger = undef;
                   $state_reached = 1;
                   last;
                 }
+              if ($state->{'RunState'} eq qq(terminated))
+                {
+                  $state_reached = 0;
+                  last;
+                }
             }
         }
       else
         {
-          $logger->log(ERR_MSG_NO_STATE, $opt->{'instance_id'}, $opt->{'region'}, $json_ptr);
+          $logger->log_no_stdout(ERR_MSG_NO_STATE, $opt->{'instance_id'}, $opt->{'region'}, $json_ptr);
         }
-      $logger->log( MSG_WRONG_INSTANCE_STATE_RETRY,
-                    $opt->{'instance_id'},
-                    $opt->{'region'},
-                    $run_state,
-                    $opt->{'exit_state'},
-                    $try_number + 1,
-                    $opt->{'polling_delay'});
+      $logger->log_no_stdout( MSG_WRONG_INSTANCE_STATE_RETRY,
+                              $opt->{'instance_id'},
+                              $opt->{'region'},
+                              $run_state,
+                              $opt->{'exit_state'},
+                              $try_number + 1,
+                              $opt->{'polling_delay'});
       sleep($opt->{'polling_delay'});
     }
 
-  my $state_flag = "has not"; $state_flag = "has" if ($state_reached);
-  my $result_obj = { 'msg' => sprintf(MSG_INSTANCE_STATE_RESULT, $opt->{'instance_id'}, $opt->{'region'}, $state_flag, $run_state) };
+  my $state_flag = "has not"; my $status = -1;
   if ($state_reached)
     {
-      $result_obj->{'status'} = 200;
-      my $result_json = undef;
-      ($ret, $result_json) = Helpers::Misc::toJSON($result_obj);
-      print STDOUT $result_json;
+      $state_flag = "has";
+      $status = 0;
     }
-
-  $logger->log($result_obj->{'msg'});
-  exit(1) if (!$state_reached);
-  exit(0);
+  my $status_msg = sprintf(MSG_INSTANCE_STATE_RESULT, $opt->{'instance_id'}, $opt->{'region'}, $state_flag, $opt->{'exit_state'});
+  Helpers::Misc::display_and_exit($status, $status_msg);
 }
 
 exit(0);
