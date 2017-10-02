@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = 0.07;
+  our $VERSION = 0.08;
 }
 
 use Sys::Syslog qw(:standard :macros);
@@ -80,7 +80,7 @@ sub status
         }
       else
         {
-          if ($status =~ m/^(200|503)$/)
+          if ($status =~ m/^(200|500|503)$/)
             {
               $self->{'json_status'} = $status;
             }
