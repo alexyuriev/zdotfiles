@@ -11,7 +11,7 @@ use FileHandle;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.11";
+  our $VERSION = "0.12";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -155,7 +155,7 @@ sub toJSON
   my $ptr = shift @_;
   my $opt = shift @_;
 
-  my $undefok = 0; $undefok = 1 if (defined $opt && $opt->{'undef_ok'} eq "1");
+  my $undefok = 0; $undefok = 1 if (defined $opt && defined $opt->{'undef_ok'} && $opt->{'undef_ok'} eq "1");
   if (!defined $ptr)
     {
       return (0, qq(Received an undef)) if (!$undefok);
