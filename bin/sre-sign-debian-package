@@ -1,0 +1,240 @@
+#!/usr/bin/perl
+
+# sre-sign-debian-package
+#
+# Signs a debian package like dpkg-sig except in this case it actually works
+#
+# Version 0.0.2
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use File::Path;
+use Cwd;
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::Logger;
+use Helpers::Misc;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_MISSING_CONFIG           => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_CONFIG_NOT_JSON          => qq(Configuration file %s does not appear to be a JSON: %s);
+
+use constant ERR_MSG_MISSING_PACKAGE          => qq(Need a name of the debian package to sign);
+use constant ERR_MSG_UNKNOWN_PACKAGE_TYPE     => qq(The package %s does not appear to be a debian package);
+use constant ERR_MSG_MISSING_TMPDIR           => qq(Missing a name of a local temporary directory);
+use constant ERR_MSG_MISSING_KEYFILE          => qq(Need a name of the %s key file);
+use constant ERR_MSG_MISSING_SIGTYPE          => qq(Missing package signature type);
+use constant ERR_MSG_MISSING_TRUSTFILE        => qq(Missing a name of key ring trust file);
+use constant ERR_MSG_TRUSTFILE_NOT_GPG        => qq(Trust file %s does not appear to be GPG);
+use constant ERR_MSG_UNKNOWN_SIGTYPE          => qq(Signature type must be either 'builder' or 'origin');
+use constant ERR_MSG_KEYFILE_NOT_GPG          => qq(%s key file does not appear to be a GPG key file);
+use constant ERR_MSG_MISSING_KEYID            => qq(Missing key id to use to sign the package);
+use constant ERR_MSG_MISSING_PUBLISHDIR       => qq(Directory to publish signed packages is missing);
+
+our $logger = undef;
+
+{
+
+  my $opt = {
+                'TOOL_NAME'       => qq(sre-sign-debian-package),
+                'TOOL_DESC'       => qq(Signs an existing debian package),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 2,
+
+                'tmpdir'          => undef,
+                'secret_keyring'  => undef,
+                'public_keyring'  => undef,
+                'trustdb_name'    => undef,
+                'publish_dir'     => undef,
+                'package'         => undef,
+                'sigtype'         => undef,
+
+                'config'          => undef,
+                'verbose'         => 1,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'tmpdir'} = sprintf("/tmp/%s", $opt->{'TOOL_NAME'});
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helper::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $loggerConfig =  {
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, },
+                      };
+
+  my $ret = GetOptions(
+                          "keyid=s"           => \$opt->{'keyid'},
+                          "publish-dir=s"     => \$opt->{'publish_dir'},
+                          "package=s"         => \$opt->{'package'},
+                          "sigtype=s"         => \$opt->{'sigtype'},
+                          "trustdb-name=s"    => \$opt->{'trustdb_name'},
+                          "secret-keyring=s"  => \$opt->{'secret_keyring'},
+                          "public-keyring=s"  => \$opt->{'public_keyring'},
+                          "tmpdir=s"          => \$opt->{'tmpdir'},
+                          "help"              => \$opt->{'help'},
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  $logger = Helpers::Logger->new($loggerConfig);
+  my $start_dir = getcwd();
+
+  $opt->{'config'} = $opt->{'default_config'} if (Helpers::Misc::isEmpty($opt->{'config'}));
+  my $config_json_ptr = undef;
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'config'} ne $opt->{'default_config'});
+      $config_json_ptr = undef;
+    }
+
+  my $config = undef;
+  if (defined $config_json_ptr)
+    {
+      ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+    }
+
+  foreach my $f (qw/tmpdir secret_keyring public_keyring trustdb_name sigtype package publish_dir keyid/)
+    {
+      $config->{$f} = $opt->{$f} if (!Helpers::Misc::isEmpty($opt->{$f}));
+    }
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_PACKAGE)           if (Helpers::Misc::isEmpty($config->{'package'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_UNKNOWN_PACKAGE_TYPE)      unless ($config->{'package'} =~ m/\.deb$/);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_SIGTYPE)           if (Helpers::Misc::isEmpty($config->{'sigtype'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_UNKNOWN_SIGTYPE)           unless ($config->{'sigtype'} =~ m/^(origin|builder)$/);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_KEYFILE, "public") if (Helpers::Misc::isEmpty($config->{'public_keyring'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_KEYFILE, "secret") if (Helpers::Misc::isEmpty($config->{'secret_keyring'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_KEYFILE_NOT_GPG, "public") unless ($config->{'public_keyring'} =~ m/\.gpg$/);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_KEYFILE_NOT_GPG, "secret") unless ($config->{'secret_keyring'} =~ m/\.gpg$/);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_TRUSTFILE )        if (Helpers::Misc::isEmpty($config->{'trustdb_name'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_TRUSTFILE_NOT_GPG )        unless ($config->{'trustdb_name'} =~ m/\.gpg/);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_TMPDIR)            if (Helpers::Misc::isEmpty($config->{'tmpdir'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_KEYID)             if (Helpers::Misc::isEmpty($config->{'keyid'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_PUBLISHDIR)        if (Helpers::Misc::isEmpty($config->{'publish_dir'}));
+
+  my $this_tmpdir = sprintf("%s.%s", $config->{'tmpdir'}, $$);
+
+  if (! -d $this_tmpdir)
+    {
+      $logger->log("Temporary directory %s does not exist, creating", $this_tmpdir);
+      File::Path::make_path($this_tmpdir, {'verbose' => 0,'mode' => 0700, 'error' => \$ret });
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to create a temporary directory %s. Will retry", $this_tmpdir) if (scalar @$ret != 0);
+    }
+
+  $ret = chdir($this_tmpdir);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to change to the temporary directory %s), $this_tmpdir) if (!$ret);
+
+  $logger->log("Extracting debian package %s to directory %s", $config->{'package'}, $this_tmpdir) if ($opt->{'verbose'});
+  my $cmd = sprintf("ar x %s/%s", $start_dir, $config->{'package'});
+  if ($ret = system($cmd))
+    {
+      chdir($start_dir);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to extract debian package %s into temporary directory %s", $config->{'package'}, $this_tmpdir);
+    }
+
+  my $tmpcontent_file = "combined-content";
+
+  $logger->log("Assembling content of the package %s to generate a signature", $config->{'package'});
+  $cmd = sprintf("cat debian-binary control.tar.gz data.tar.gz > %s", $tmpcontent_file);
+  if ($ret = system($cmd))
+    {
+      chdir($start_dir);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to assemble content of the package %s to generate a signature", $config->{'package'});
+    }
+
+  $logger->log("Signing package %s signature type %s using key %s", $config->{'package'}, $config->{'sigtype'}, $config->{'keyid'}) if ($opt->{'verbose'});
+  my $sigfile = sprintf("_gpg%s", $config->{'sigtype'});
+  $cmd = sprintf("gpg --yes --no-default-keyring --secret-keyring %s --keyring %s --trustdb-name %s -abs -u %s -o %s %s", $config->{'secret_keyring'}, $config->{'public_keyring'}, $config->{'trustdb_name'}, $config->{'keyid'}, $sigfile, $tmpcontent_file);
+
+  if ($ret = system($cmd))
+    {
+      chdir($start_dir);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to sign package %s signature type %s using key %s), $config->{'package'}, $config->{'sigtype'}, $config->{'keyid'});
+    }
+
+  my $final_package = sprintf("%s/%s", $config->{'publish_dir'}, $config->{'package'});
+  $logger->log("Assembling a signed %s package in %s", $config->{'package'}, $final_package) if ($opt->{'verbose'});
+  $cmd = sprintf("ar rc %s %s debian-binary control.tar.gz data.tar.gz", $final_package, $sigfile);
+  if ($ret = system($cmd))
+    {
+      chdir($start_dir);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to assemble a signed %s package in %s), $config->{'package'}. $final_package);
+    }
+
+  $logger->log("Removing temporary files from %s", $this_tmpdir) if (!$opt->{'verbose'});
+  my @delete_files = ("debian-binary", "control.tar.gz", "data.tar.gz", $tmpcontent_file, $sigfile);
+  $ret = unlink @delete_files;
+  if ($ret != scalar @delete_files)
+    {
+      chdir($start_dir);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failure: deleted only %s out of %s temporary files), $ret, scalar @delete_files);
+    }
+
+  chdir($start_dir);
+  $logger->log("Removing temporary directory %s", $this_tmpdir);
+  $ret = rmdir $this_tmpdir;
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to remove temporary directory %s), $this_tmpdir) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_SUCCESS, qq(Signed package %s with a signature type %s using key id %s is available in %s), $config->{'package'}, $config->{'sigtype'}, $config->{'keyid'}, $final_package);
+}
+
+exit( EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --package=<package.deb>       Sign package <package.deb>\n");
+  printf("                                    Default: %s\n", $opt->{'package'});
+  printf("      --sigtype=<type>              Create a debian signature of a type <type>\n");
+  printf("                                    Available types: 'origin', 'builder'\n");
+  printf("                                    Default: %s\n", $opt->{'sigtype'});
+  printf("      --public-keyring=<pubring>    Use a public GPG keyring <pubring>\n");
+  printf("                                    Default: %s\n", $opt->{'public_keyring'});
+  printf("      --secret-keyring=<pubring>    Use a secret GPG keyring <pubring>\n");
+  printf("                                    Default: %s\n", $opt->{'secret_keyring'});
+  printf("      --trustdb-name=<trustdb>      Use a trust db file <trustdb>\n");
+  printf("                                    Default: %s\n", $opt->{'trustdb_name'});
+  printf("      --keyid=<keyid>               Sign using GPG key ID <keyid>\n");
+  printf("                                    Default: %s\n", $opt->{'keyid'});
+  printf("      --publish-dir=<dir>           Publish signed packages to directory <dir>\n");
+  printf("                                    Default: %s\n", $opt->{'publish_dir'});
+  printf("      --tmpdir=<tmpdir>             Use directory <tmpdir> as a temporary directory\n");
+  printf("                                    Default: %s\n", $opt->{'tmpdir'});
+  printf("      --verbose                     Activate additional logging\n");
+  printf("                                    Default: no\n");
+  printf("      --help                        This help\n");
+
+  exit(0);
+}
+
