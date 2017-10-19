@@ -4,7 +4,7 @@
 #
 # Signs a debian package like dpkg-sig except in this case it actually works
 #
-# Version 0.0.2
+# Version 0.0.3
 
 use strict;
 use warnings;
@@ -63,7 +63,7 @@ our $logger = undef;
                 'TOOL_DESC'       => qq(Signs an existing debian package),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 2,
+                'TOOL_VER_PATCH'  => 3,
 
                 'tmpdir'          => undef,
                 'secret_keyring'  => undef,
@@ -181,7 +181,7 @@ our $logger = undef;
 
   my $final_package = sprintf("%s/%s", $config->{'publish_dir'}, $config->{'package'});
   $logger->log("Assembling a signed %s package in %s", $config->{'package'}, $final_package) if ($opt->{'verbose'});
-  $cmd = sprintf("ar rc %s %s debian-binary control.tar.gz data.tar.gz", $final_package, $sigfile);
+  $cmd = sprintf("ar rc %s debian-binary control.tar.gz data.tar.gz %s", $final_package, $sigfile);
   if ($ret = system($cmd))
     {
       chdir($start_dir);
