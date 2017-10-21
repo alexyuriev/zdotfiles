@@ -44,8 +44,7 @@ use constant ERR_MSG_INVALID_INSTANCE_ID      => qq(Must provide a valid AWS EC2
 use constant ERR_MSG_MISSING_TAG              => qq(Need provide a name of the tag to set);
 use constant ERR_MSG_MISSING_VALUE            => qq(Must provide a value to set the tag to);
 use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to value %s on AWS EC2 instance %s in region %s);
-use constant MSG_TAG_SET                      => qq(Tag %s to value %s on AWS EC2 instance %s in region %s has been set successfully);
-
+use constant MSG_TAG_SET                      => qq(Succsfully set tag '%s' to value '%s' on AWS EC2 instance '%s' in region '%s');
 
 {
 
@@ -67,7 +66,7 @@ use constant MSG_TAG_SET                      => qq(Tag %s to value %s on AWS EC
   my $ret = GetOptions(   "tag=s"             => \$opt->{'tag'},
                           "value=s"           => \$opt->{'value'},
                           "region=s"          => \$opt->{'region'},
-                          "instance_id=s"     => \$opt->{'instance_id'},
+                          "instance-id=s"     => \$opt->{'instance_id'},
                           "help"              => \$opt->{'help'}
                       );
 
@@ -80,10 +79,10 @@ use constant MSG_TAG_SET                      => qq(Tag %s to value %s on AWS EC
   Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_TAG)             if (Helpers::Misc::isEmpty($opt->{'tag'}));
   Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_VALUE)           if (Helpers::Misc::isEmpty($opt->{'value'}));
 
-  my $cmd = sprintf("aws ec2 create-tags --region %s --resource=%s --tags Key=%,Value='%s'", $opt->{'region'}, $opt->{'instance_id'}, $opt->{'tag'}, $opt->{'value'});
+  my $cmd = sprintf("aws ec2 create-tags --region %s --resource=%s --tags Key=%s,Value='%s'", $opt->{'region'}, $opt->{'instance_id'}, $opt->{'tag'}, $opt->{'value'});
   $ret = system($cmd);
   Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_SET_TAG_FAILED, $opt->{'tag'}, $opt->{'value'}, $opt->{'instance_id'}, $opt->{'region'}) if ($ret != 0);
-  Helpers::Misc::display_and_exit( EXIT_SUCCESS, MSG_TAG_SET, $opt->{'tag'}, $opt->{'value'}, $opt->{'instance_id'})
+  Helpers::Misc::display_and_exit( EXIT_SUCCESS, MSG_TAG_SET, $opt->{'tag'}, $opt->{'value'}, $opt->{'instance_id'}, $opt->{'region'});
 }
 
 exit(EXIT_FAILURE);
