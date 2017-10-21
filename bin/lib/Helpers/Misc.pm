@@ -8,10 +8,11 @@ use strict;
 use warnings;
 
 use FileHandle;
+use Cwd;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.12";
+  our $VERSION = "0.13";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -206,6 +207,9 @@ sub display_and_exit
       printf("%s\n", $assembled_msg);
     }
 
+  my $cwd = $main::saved_starting_dir;
+  chdir($cwd) if (!Helpers::Misc::isEmpty($cwd));
+
   exit($code);
 }
 
@@ -281,6 +285,18 @@ sub isUnsignedInteger
       $r = 1 if ( $a =~ /^\d+$/g);
     }
   return $r;
+}
+
+sub collapse_spaces
+{
+  my $txt = shift @_;
+  return undef if (!defined $txt);
+
+  $txt =~ s/\s+/ /g;
+  $txt =~ s/^\s+//g;
+  $txt =~ s/\s+$//g;
+
+  return $txt;
 }
 
 
