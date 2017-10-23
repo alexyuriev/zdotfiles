@@ -101,7 +101,7 @@ sub writeFile
       else
         {
           $fhw = FileHandle->new($fname, "w");
-      }
+        }
     }
   else
     {
