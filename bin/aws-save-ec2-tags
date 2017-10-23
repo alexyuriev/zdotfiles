@@ -1,0 +1,141 @@
+#!/usr/bin/perl
+
+# aws-save-ec2-tags
+#
+# Saves AWS EC2 tags
+# Requires configured aws tool
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::AWS;
+use Helpers::Misc;
+
+use constant EXIT_SUCCESS => 0;
+use constant EXIT_FAILURE => 1;
+
+use constant ERR_MSG_MISSING_INSTANCE_ID      => qq(AWS instance ID is missing);
+use constant ERR_MSG_INVALID_REGION           => qq(Must provide a valid AWS EC2 region);
+use constant ERR_MSG_MISSING_AWS_EC2_REGION   => qq(AWS EC2 region name is missing);
+use constant ERR_MSG_INVALID_INSTANCE_ID      => qq(Must provide a valid AWS EC2 instance id);
+use constant ERR_MSG_MISSING_TAG              => qq(Need provide a name of the tag to set);
+use constant ERR_MSG_MISSING_OUTPUT           => qq(Need a name of the file to write tag values);
+
+use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to value %s on AWS EC2 instance %s in region %s);
+
+{
+
+  my $opt = {
+                'TOOL_NAME'       => qq(aws-set-ec2-tags),
+                'TOOL_DESC'       => qq(Saves tags from AWS EC2 instance to a file),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 1,
+                'tag'             => undef,
+                'mode'            => 0600,
+                'output_file'     => undef,
+                'instance_id'     => undef,
+                'region'          => undef,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  my $ret = GetOptions(   "tag=s"             => \$opt->{'tag'},
+                          "region=s"          => \$opt->{'region'},
+                          "instance-id=s"     => \$opt->{'instance_id'},
+                          "output-file=s"     => \$opt->{'output_file'},
+                          "help"              => \$opt->{'help'}
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_INSTANCE_ID)     if (Helpers::Misc::isEmpty($opt->{'instance_id'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_INSTANCE_ID)     if (!Helpers::AWS::isValidEC2InstanceId($opt->{'instance_id'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_AWS_EC2_REGION)  if (Helpers::Misc::isEmpty($opt->{'region'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_REGION)          if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_TAG)             if (Helpers::Misc::isEmpty($opt->{'tag'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_OUTPUT)          if (Helpers::Misc::isEmpty($opt->{'output_file'}));
+
+  my $cmd = sprintf("aws ec2 describe-tags --filter 'Name=resource-id,Values=%s' 'Name=key,Values=%s' --region=%s|",
+                     $opt->{'instance_id'},
+                     $opt->{'tag'},
+                     $opt->{'region'});
+  my $dptr = undef;
+  ($ret, $dptr) = Helpers::Misc::readFile($cmd);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to fetch value for tag '%s' from AWS instance '%s' in region '%s'") if (!$ret);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "AWS EC2 API returned an invalid response for a tag description") if ($$dptr eq '');
+
+  my $tag_obj = undef;
+  ($ret, $tag_obj) = Helpers::Misc::fromJSON($$dptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "AWS EC2 API returned a non-JSON for a tag description: %s", $tag_obj) if (!$ret);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "JSON returned by AWS EC2 API does not contain Tags node") if (!defined $tag_obj->{'Tags'});
+
+  use Data::Dumper;
+
+  my $value = undef;
+  foreach my $this_tag (@{$tag_obj->{'Tags'}})
+    {
+      next if (Helpers::Misc::isEmpty($this_tag->{'Value'}));
+      $value = $this_tag->{'Value'};
+      last;
+    }
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Can't find a tag '%s' assigned to AWS EC2 instance '%s' in region '%s'", $opt->{'tag'}, $opt->{'instance_id'}, $opt->{'region'}) if (!defined $value);
+  $value =~ s/,/\n/g; $value .= "\n";
+  my $fname = $opt->{'output_file'} . "." . $$;
+  my $r = undef;
+  ($ret, $r) = Helpers::Misc::writeFile($fname, $value, { 'mode' => $opt->{'mode'}});
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to write tag value into a temporary file %s: %s", $fname, $r) if (!$ret);
+
+  $ret = rename $fname, $opt->{'output_file'};
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to rename temporary file %s to output file %s", $fname, $opt->{'output_file'}) if (!$ret);
+  Helpers::Misc::display_and_exit( EXIT_SUCCESS, "Wrote value of '%s' tag of AWS EC2 instance '%s' in region '%s' to '%s'", $opt->{'tag'}, $opt->{'instance_id'}, $opt->{'region'}, $opt->{'output_file'});
+}
+
+exit(EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --instance-id=<id>         Get tag on AWS instance id <id>\n");
+  printf("                                 Default: %s\n", $opt->{'instance_id'});
+  printf("      --region=<region>          Get tag on AWS instance in region <region>\n");
+  printf("                                 Default: %s\n", $opt->{'region'});
+  printf("      --tag=<tag>                Get tag <tag>\n");
+  printf("                                 Default: %s\n", $opt->{'tag'});
+  printf("      --output-file=<filename>   Write tag value into file <filename>\n");
+  printf("                                 Default: %s\n", $opt->{'value'});
+  printf("      --help                     This help\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(EXIT_SUCCESS);
+
+}
