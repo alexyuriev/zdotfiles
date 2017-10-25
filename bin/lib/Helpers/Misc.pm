@@ -12,7 +12,7 @@ use Cwd;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.13";
+  our $VERSION = "0.15";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -68,13 +68,19 @@ sub readFile
 #                        If $fname starts with |, we presume it is a pipe
 #              $text   - Content to write to $fname
 #              $opt    - Optional argument hash:
-#                        $opt->{'mode'} - chmod file to this permission.
-#                        Applicable only to regular files. Failure to change
-#                        mode upon opening causes an attempt to delete the file
-#                        and always returns error to the caler
+#                        - mode          : chmod file to this permission.  Failure to change
+#                                          mode upon opening causes an attempt to delete the
+#                                          file and always returns error to the caler.
+#                                          Applicable only to regular files.
+#                        - append_file   : 1 - append to file instead of truncating it and
+#                                              rewriting from the start
+#                                          0 - normal operation - truncate the file
+#                                          Applicable only to regular files.
+#
 #      OUTPUT: $ret    - Result code
 #                        1 -- Success
 #                        0 -- Failure
+#              $r      - Text status of the result code. Typically additioanl hints about errors.
 
 sub writeFile
 {
@@ -89,6 +95,16 @@ sub writeFile
 
   my $is_pipe = 0;
   my $is_stdout = 0;
+  my $is_append = 0;
+
+  if (defined $opt && defined $opt->{'append_mode'})
+    {
+      my $errmsg = qq(writeFiile() received an {'append_mode'} parameter which was not 0 or 1);
+      return (0, $errmsg) if (!isUnsignedInteger($opt->{'append_mode'}));
+      return (0, $errmsg) if ($opt->{'append_mode'} != 0 && $opt->{'append_mode'} != 1);
+      $is_append = 1 if ($opt->{'append_mode'} == 1);
+    }
+
   my $fhw = undef;
 
   if (!Helpers::Misc::isEmpty($fname))
@@ -100,7 +116,8 @@ sub writeFile
         }
       else
         {
-          $fhw = FileHandle->new($fname, "w");
+          my $write_mode = { "0" => "w", "1" => "a" };
+          $fhw = FileHandle->new($fname, $write_mode->{$is_append});
         }
     }
   else
