@@ -4,7 +4,7 @@
 #
 # Signs a debian package like dpkg-sig except in this case it actually works
 #
-# Version 0.0.3
+# Version 0.0.5
 
 use strict;
 use warnings;
@@ -54,16 +54,20 @@ use constant ERR_MSG_KEYFILE_NOT_GPG          => qq(%s key file does not appear 
 use constant ERR_MSG_MISSING_KEYID            => qq(Missing key id to use to sign the package);
 use constant ERR_MSG_MISSING_PUBLISHDIR       => qq(Directory to publish signed packages is missing);
 
+use constant ERR_MSG_PKG_EXTRACTION_FAILED    => qq(Failed to extract debian package %s into temporary directory %s);
+use constant ERR_MSG_PKG_ASSEMBLY_FAILED      => qq(Failed to assemble content of the package %s to generate a signature);
+use constant ERR_MSG_PKG_SGN_FAILED           => qq(Failed to sign package %s signature type %s using key %s);
+
 our $logger = undef;
+our $saved_starting_dir = getcwd();
 
 {
-
   my $opt = {
                 'TOOL_NAME'       => qq(sre-sign-debian-package),
                 'TOOL_DESC'       => qq(Signs an existing debian package),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 3,
+                'TOOL_VER_PATCH'  => 5,
 
                 'tmpdir'          => undef,
                 'secret_keyring'  => undef,
@@ -80,7 +84,7 @@ our $logger = undef;
 
   $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
   $opt->{'tmpdir'} = sprintf("/tmp/%s", $opt->{'TOOL_NAME'});
-  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helper::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
 
   my $loggerConfig =  {
                         'ident' => $opt->{'TOOL_NAME'},
@@ -102,7 +106,6 @@ our $logger = undef;
   display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
 
   $logger = Helpers::Logger->new($loggerConfig);
-  my $start_dir = getcwd();
 
   $opt->{'config'} = $opt->{'default_config'} if (Helpers::Misc::isEmpty($opt->{'config'}));
   my $config_json_ptr = undef;
@@ -148,56 +151,36 @@ our $logger = undef;
       Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to create a temporary directory %s. Will retry", $this_tmpdir) if (scalar @$ret != 0);
     }
 
-  $ret = chdir($this_tmpdir);
-  Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to change to the temporary directory %s), $this_tmpdir) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to change to the temporary directory %s), $this_tmpdir) if (!chdir($this_tmpdir));
 
   $logger->log("Extracting debian package %s to directory %s", $config->{'package'}, $this_tmpdir) if ($opt->{'verbose'});
-  my $cmd = sprintf("ar x %s/%s", $start_dir, $config->{'package'});
-  if ($ret = system($cmd))
-    {
-      chdir($start_dir);
-      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to extract debian package %s into temporary directory %s", $config->{'package'}, $this_tmpdir);
-    }
+  my $cmd = sprintf("ar x %s/%s", $saved_starting_dir, $config->{'package'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_PKG_EXTRACTION_FAILED, $config->{'package'}, $this_tmpdir) if (system($cmd) != 0);
 
   my $tmpcontent_file = "combined-content";
-
   $logger->log("Assembling content of the package %s to generate a signature", $config->{'package'});
   $cmd = sprintf("cat debian-binary control.tar.gz data.tar.gz > %s", $tmpcontent_file);
-  if ($ret = system($cmd))
-    {
-      chdir($start_dir);
-      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to assemble content of the package %s to generate a signature", $config->{'package'});
-    }
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_PKG_ASSEMBLY_FAILED, $config->{'package'}) if (system($cmd) != 0);
 
   $logger->log("Signing package %s signature type %s using key %s", $config->{'package'}, $config->{'sigtype'}, $config->{'keyid'}) if ($opt->{'verbose'});
   my $sigfile = sprintf("_gpg%s", $config->{'sigtype'});
   $cmd = sprintf("gpg --yes --no-default-keyring --secret-keyring %s --keyring %s --trustdb-name %s -abs -u %s -o %s %s", $config->{'secret_keyring'}, $config->{'public_keyring'}, $config->{'trustdb_name'}, $config->{'keyid'}, $sigfile, $tmpcontent_file);
-
-  if ($ret = system($cmd))
-    {
-      chdir($start_dir);
-      Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to sign package %s signature type %s using key %s), $config->{'package'}, $config->{'sigtype'}, $config->{'keyid'});
-    }
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_PKG_SGN_FAILED, $config->{'package'}, $config->{'sigtype'}, $config->{'keyid'}) if (system($cmd) != 0);
 
   my $final_package = sprintf("%s/%s", $config->{'publish_dir'}, $config->{'package'});
   $logger->log("Assembling a signed %s package in %s", $config->{'package'}, $final_package) if ($opt->{'verbose'});
-  $cmd = sprintf("ar rc %s debian-binary control.tar.gz data.tar.gz %s", $final_package, $sigfile);
-  if ($ret = system($cmd))
-    {
-      chdir($start_dir);
-      Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to assemble a signed %s package in %s), $config->{'package'}. $final_package);
-    }
+  $cmd = sprintf("ar rc %s debian-binary %s control.tar.gz data.tar.gz", $final_package, $sigfile);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to assemble a signed %s package in %s), $config->{'package'}, $final_package) if (system($cmd) != 0);
 
   $logger->log("Removing temporary files from %s", $this_tmpdir) if (!$opt->{'verbose'});
   my @delete_files = ("debian-binary", "control.tar.gz", "data.tar.gz", $tmpcontent_file, $sigfile);
   $ret = unlink @delete_files;
   if ($ret != scalar @delete_files)
     {
-      chdir($start_dir);
       Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failure: deleted only %s out of %s temporary files), $ret, scalar @delete_files);
     }
 
-  chdir($start_dir);
+  chdir($saved_starting_dir);
   $logger->log("Removing temporary directory %s", $this_tmpdir);
   $ret = rmdir $this_tmpdir;
   Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to remove temporary directory %s), $this_tmpdir) if (!$ret);
@@ -231,8 +214,6 @@ sub display_help_and_exit
   printf("                                    Default: %s\n", $opt->{'publish_dir'});
   printf("      --tmpdir=<tmpdir>             Use directory <tmpdir> as a temporary directory\n");
   printf("                                    Default: %s\n", $opt->{'tmpdir'});
-  printf("      --verbose                     Activate additional logging\n");
-  printf("                                    Default: no\n");
   printf("      --help                        This help\n");
 
   exit(0);
