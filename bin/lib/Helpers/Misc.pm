@@ -12,7 +12,7 @@ use Cwd;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.15";
+  our $VERSION = "0.16";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -186,14 +186,33 @@ sub toJSON
   return (1, $json->encode($ptr));
 }
 
+# FUNCTION: $str = strip_comments($s)
+#
+# DESCRIPTION: Function strips comments starting from #.
+#
+#       INPUT: $s   - string
+#
+#      OUTPUT: $str - string to the left of a comment symbol.
+#                     $str is undef if $f is undef
+#                     $str is '' if comment symbol if the first
+#                     character of the string.
+
+sub strip_comments
+{
+  my $str = shift @_;
+
+  return undef if (!defined $str);
+
+  my ($before, $after) = split('#', $str, 2);
+  $before = '' if (!defined $before);
+  return $before;
+}
+
 sub removeSpaces
 {
   my $txt = shift @_;
-  return '' if (isEmpty($txt));
-
-  $txt =~ s/\s+//g;
-
-  return $txt;
+  print STDERR "Helpers::Misc::removeSpaces() called. Convert to Helpers::Misc::collapse_spaces()\n";
+  return collapse_spaces($txt);
 }
 
 sub display_and_exit
@@ -307,11 +326,28 @@ sub isUnsignedInteger
 sub collapse_spaces
 {
   my $txt = shift @_;
+  my $opt = shift @_;
+
   return undef if (!defined $txt);
 
-  $txt =~ s/\s+/ /g;
-  $txt =~ s/^\s+//g;
-  $txt =~ s/\s+$//g;
+
+  my $default_opt = {
+                      'trailing' => 1,
+                      'middle'   => 1,
+                      'leading'  => 1,
+                    };
+
+  if (defined $opt)
+    {
+      foreach my $f (keys %{$default_opt})
+        {
+          $default_opt->{$f} = $opt->{$f} if (defined $opt->{$f});
+        }
+    }
+
+  $txt =~ s/\s+/ /g if ($default_opt->{'middle'}   == 1);
+  $txt =~ s/^\s+//g if ($default_opt->{'leading'}  == 1);
+  $txt =~ s/\s+$//g if ($default_opt->{'trailing'} == 1);
 
   return $txt;
 }
