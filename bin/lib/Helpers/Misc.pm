@@ -12,7 +12,7 @@ use Cwd;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.16";
+  our $VERSION = "0.17";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -350,6 +350,11 @@ sub collapse_spaces
   $txt =~ s/\s+$//g if ($default_opt->{'trailing'} == 1);
 
   return $txt;
+}
+
+sub perl_function
+{
+  return (caller(1))[3];
 }
 
 
