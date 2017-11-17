@@ -13,7 +13,7 @@ use JSON;
 use Helpers::Misc;
 
 BEGIN {
-  our $VERSION = "0.07";
+  our $VERSION = "0.08";
 }
 
 
@@ -157,6 +157,17 @@ sub isValidAWSRegion
   return undef if (!defined $region);
   return 1 if (defined $AWS_EC2_REGIONS->{$region});
   return 0;
+}
+
+sub isValidAWSAz {
+  my $az = shift @_;
+
+  return 0 if (!defined $az);
+
+  my $chr = chop($az);
+  return 0 unless $chr =~ m/^(a|b|c)$/g;
+  return 0 if (!isValidAWSRegion($az));
+  return 1;
 }
 
 sub azToRegion
