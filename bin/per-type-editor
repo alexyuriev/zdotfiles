@@ -1,0 +1,93 @@
+#!/usr/bin/perl
+
+# per-type-editor
+#
+# Invokes an editor based on file-type of the argument passed.
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use File::Path;
+use Cwd;
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::Misc;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_MISSING_CONFIG    => qq(Unable to read per-type-editor configuration file %s);
+use constant ERR_MSG_CONFIG_NOT_JSON   => qq(Per-type-editor configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_NO_DEFAULT_EDITOR => qq(Per-type-editor configuration file %s is missing a 'default_editor' to level node);
+use constant ERR_MSG_NO_RULES_DEFINED  => qq(Per-type-editor configuration file %s is missing rule definition);
+
+{
+  my $opt = {
+                'TOOL_NAME'       => qq(per-type-editor),
+                'TOOL_DESC'       => qq(Invokes editor per file type),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 1,
+
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if (!$ret);
+
+  my $config = undef;
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON,   $opt->{'config'}, $config) if (!$ret);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_NO_DEFAULT_EDITOR, $opt->{'config'})          if (Helpers::Misc::isEmpty($config->{'default_editor'}));
+
+  exit(system($config->{'default_editor'})) if ($#ARGV == -1);
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_NO_RULES_DEFINED, $opt->{'config'}) if (!defined $config->{'editor_rules'});
+
+  my $editor = undef;
+  foreach my $this_rule (@{$config->{'editor_rules'}})
+    {
+      if ($ARGV[0] =~ m/$this_rule->{'match'}/)
+        {
+          $editor = $this_rule->{'editor'};
+          last;
+        }
+    }
+  if (!defined $editor)
+    {
+      printf("Did not find matching editor for %s, running default editor %s\n", $ARGV[0], $config->{'default_editor'});
+      $editor = $config->{'default_editor'};
+    }
+
+  my $cmd = $editor . " " . join(' ', @ARGV);
+  exit (system($cmd));
+
+}
+
+exit( EXIT_FAILURE);
+
