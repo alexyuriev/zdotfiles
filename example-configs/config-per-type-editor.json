@@ -1,0 +1,9 @@
+{
+  "default_editor": "joe",
+  "editor_rules": [
+    {
+      "match"  : "\\.pp$",
+      "editor" : "sublime_text"
+    }
+  ]
+}
