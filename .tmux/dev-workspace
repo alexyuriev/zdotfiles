@@ -1,0 +1,4 @@
+# 3 window dev workspace session
+
+split-window -h -p 50 
+split-window -v -p 50 
