@@ -29,7 +29,7 @@ DSTHELPERLIBDIR=${DSTDIR}/${SRCHELPERLIBDIR}
 SRCBINDIR=bin
 
 HELPERLIBS="AWS.pm Misc.pm Logger.pm"
-AWSTOOLS="aws-iam-create-user aws-build-ec2-instance aws-list-ec2-sec-groups aws-create-ec2-sec-group aws-edit-ec2-sec-group aws-wait-ec2-instance-state aws-list-ec2-instances aws-list-iam-policies aws-set-ec2-tags aws-save-ec2-tags"
+AWSTOOLS="aws-iam-create-user aws-build-ec2-instance aws-list-ec2-sec-groups aws-create-ec2-sec-group aws-edit-ec2-sec-group aws-wait-ec2-instance-state aws-list-ec2-instances aws-list-iam-policies aws-set-ec2-tags aws-save-ec2-tags aws-srv-ip*"
 MISCBINS="batcheck randompass take-screenshot show-my-external-ipv4 gitup url-2-file"
 ROOTDOTFILES=".curlrc .bash_profile .nvidia-settings-rc .compton.conf .Xresources .xbindkeysrc"
 PROFILEDFILES="opt.sh"
