@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = 0.08;
+  our $VERSION = 0.09;
 }
 
 use Sys::Syslog qw(:standard :macros);
@@ -28,7 +28,15 @@ sub new
   return undef if (!defined $opt);
 
   return undef if (Helpers::Misc::isEmpty($opt->{'ident'}));
-  $self->{'ident'} = $opt->{'ident'};
+
+  if (defined $ENV{'LOGTAG'})
+    {
+      $self->{'ident'} = $ENV{'LOGTAG'};
+    }
+  else
+    {
+      $self->{'ident'} = $opt->{'ident'};
+    }
 
   return undef if (!defined $opt->{'loggers'});
   if (defined $opt->{'loggers'}->{'syslog'})
