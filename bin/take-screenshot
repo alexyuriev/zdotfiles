@@ -4,7 +4,7 @@ SCREENSHOTDIR=Screenshots
 NAMEPREFIX=Screenshot-
 SDIR="$HOME/$SCREENSHOTDIR"
 WHEN=`date "+%F_%T_%Z"`
-SHOTFILE="$SDIR/$NAMEPREFIX$WHEN"
+SHOTFILE="$SDIR/$NAMEPREFIX$WHEN.jpg"
 
 if [ ! -d "$SDIR" ]; then
 	mkdir $SDIR
