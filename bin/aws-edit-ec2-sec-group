@@ -5,7 +5,7 @@
 # Edits AWS EC2 security group
 # Requires configured aws tool
 #
-# Version 0.0.5
+# Version 0.0.6
 
 use strict;
 use warnings;
@@ -52,7 +52,7 @@ use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy to allo
                 'TOOL_DESC'       => qq(Manipulate a single rule in an existing AWS EC2 security group),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 5,
+                'TOOL_VER_PATCH'  => 6,
                 'command'         => undef,
                 'region'          => undef,
                 'group_name'      => undef,
@@ -78,7 +78,7 @@ use constant ERR_MSG_POLICY_CHANGE_FAILED      => qq(Failed to %s policy to allo
   display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
   Helpers::Misc::display_and_exit(-1, ERR_MSG_MISSING_SECGRPID_AND_NAME) if (Helpers::Misc::isEmpty($opt->{'group_name'}) && Helpers::Misc::isEmpty($opt->{'group_id'}));
   Helpers::Misc::display_and_exit(-1, ERR_MSG_CANTMIX_SECGRPID_AND_NAME) if (!Helpers::Misc::isEmpty($opt->{'group_name'}) && !Helpers::Misc::isEmpty($opt->{'group_id'}));
-  if ($opt->{'group_name'}) { $opt->{'group_txt'} = $opt->{'group_txt'}; } else { $opt->{'group_txt'} = $opt->{'group_id'}; }
+  if ($opt->{'group_name'}) { $opt->{'group_txt'} = $opt->{'group_name'}; } else { $opt->{'group_txt'} = $opt->{'group_id'}; }
 
   Helpers::Misc::display_and_exit(-1, qq(Need a valid AWS region)) if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
 
