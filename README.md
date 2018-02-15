@@ -17,7 +17,9 @@ By default it will be installed into zdotfiles of your home directory.
 * show-my-external-ipv4 - ask Google's DNS for our public IPv4 address
 
 
-AWS manipulation utilities
+### AWS manipulation utilities
+
+The following tools allow to quickly do commonly needed tasks on AWS EC2 instances.
 
 Tool name|Description
 ---------|-----------
