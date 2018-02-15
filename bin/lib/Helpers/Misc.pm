@@ -12,7 +12,7 @@ use Cwd;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.17";
+  our $VERSION = "0.18";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -291,22 +291,68 @@ sub isValidPortNumber
   return 1;
 }
 
+sub isValidIpV4
+{
+  my $ipv4 = shift @_;
+
+  return 0 if (Helpers::Misc::isEmpty($ipv4));
+
+  my @octets = split('\.', $ipv4, 5);
+  return 0 if (scalar @octets != 4);
+  foreach my $octet (@octets)
+    {
+      return 0 if (!Helpers::Misc::isUnsignedInteger($octet));
+      return 0 if ($octet > 255);
+    }
+  return 1;
+}
+
+# sub isValidIpV4CIDR
+# {
+#   my $cidr = shift @_;
+
+#   return 0 if (Helpers::Misc::isEmpty($cidr));
+#   my ($oct1, $oct2, $oct3, $oct4_extra, $junk) = split('\.', $cidr, 4);
+#   return 0 if (!Helpers::Misc::isEmpty($junk));
+
+#   my ($oct4, $net) = split('/', $oct4_extra);
+#   foreach my $oct ($oct1, $oct2, $oct3, $oct4)
+#     {
+#       return 0 if (!isUnsignedInteger($oct));
+#       return 0 if ($oct > 255);
+#     }
+#   return 0 if (!isUnsignedInteger($net));
+#   return 0 if ($net > 32);
+#   return 1;
+# }
+
 sub isValidIpV4CIDR
 {
   my $cidr = shift @_;
 
   return 0 if (Helpers::Misc::isEmpty($cidr));
-  my ($oct1, $oct2, $oct3, $oct4_extra, $junk) = split('\.', $cidr, 4);
+  my ($ipv4, $slash, $junk) = split('/', $cidr, 3);
   return 0 if (!Helpers::Misc::isEmpty($junk));
+  return 0 if (!Helpers::Misc::isValidIpV4($ipv4));
+  return 0 if (!Helpers::Misc::isUnsignedInteger($slash));
+  return 0 if ($slash > 32);
 
-  my ($oct4, $net) = split('/', $oct4_extra);
-  foreach my $oct ($oct1, $oct2, $oct3, $oct4)
-    {
-      return 0 if (!isUnsignedInteger($oct));
-      return 0 if ($oct > 255);
-    }
-  return 0 if (!isUnsignedInteger($net));
-  return 0 if ($net > 32);
+  return 1;
+}
+
+sub isValidDNSZone
+{
+  my $zone = shift @_;
+  return 0 if (Helpers::Misc::isEmpty($zone));
+
+  return 0 if ($zone =~ m/^\./);
+  return 0 if ($zone =~ m/\.\./);
+
+  $zone =~ s/[a-z]|[A-Z]//g;
+  $zone =~ s/-|_//g;
+  $zone =~ s/[0-9]//g;
+  $zone =~ s/\.//g;
+  return 0 if $zone ne '';
   return 1;
 
 }
