@@ -1,0 +1,159 @@
+#!/usr/bin/perl
+
+# aws-ec2-destroy-instance
+#
+# Destroys (after renaming) an EC2 instance
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use MIME::Base64;
+
+use Helpers::Logger;
+use Helpers::Misc;
+use Helpers::AWS;
+
+use constant EXIT_SUCCESS => 0;
+use constant EXIT_FAILURE => 1;
+
+use constant ERR_MSG_MISSING_HOSTNAME_AND_INSTANCE_ID => qq(Must provide either a hostname for the instance to destroy or the instance id);
+use constant ERR_MSG_MISSING_INSTANCE_ID              => qq(Must provide a valid instance id);
+use constant ERR_MSG_INVALID_AWS_EC2_INSTANCE_ID      => qq(AWS EC2 instance id %s does not seem to be valid);
+use constant ERR_MSG_INVALID_HOSTNAME                 => qq(Hostname %s of AWS EC2 instance does not seem to be valid);
+use constant ERR_MSG_MISSING_REGION                   => qq(Must provide a valid AWS EC2 region);
+use constant ERR_MSG_CMD_NO_INSTANCES                 => qq(Failed to get a current list of instances);
+use constant ERR_MSG_NO_INSTANCES                     => qq(Can't find instance matching hostname %s in AWS EC2 region %s);
+use constant ERR_MSG_AWS_CMD_FAILED                   => qq(Failed to execute a command against AWS API);
+use constant ERR_MSG_EC2_AWS_NO_JSON                  => qq(AWS API responded with something other than a JSON);
+use constant ERR_MSG_BAD_TERMINATION_LABEL            => qq(Only letters, digits, -, _ and . are allowed in the termination label);
+
+our $logger = undef;
+
+{
+
+  my $opt = {
+                'TOOL_NAME'               => qq(aws-destroy-ec2-instance),
+                'TOOL_DESC'               => qq(Destorys AWS instance after renaming it),
+                'TOOL_VER_MAJOR'          => 0,
+                'TOOL_VER_MINOR'          => 0,
+                'TOOL_VER_PATCH'          => 1,
+                'region'                  => undef,
+                'hostname'                => undef,
+                'instance_id'             => undef,
+                'termination_label'       => qq(TERMINATED),
+                'stdout_json'             => 0,
+                'verbose'                 => 0,
+                'help'                    => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $ret = GetOptions(   "region=s"            => \$opt->{'region'},
+                          "hostname=s"          => \$opt->{'hostname'},
+                          "instance-id=s"       => \$opt->{'instance_id'},
+                          "termination-label=s" => \$opt->{'termination_label'},
+                          "stdout-json"         => \$opt->{'stdout_json'},
+                          "help"                => \$opt->{'help'},
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $loggerConfig =  {
+                          'ident' => $opt->{'TOOL_NAME'},
+                          'loggers' => {
+                                          'syslog' => { 'facility' => qq(user) },
+                                          'stdout' => 0,
+                                          'stderr' => 1,
+                                       },
+                      };
+
+  $loggerConfig->{'loggers'}->{'stdout_json'} = 1 if ($opt->{'stdout_json'});
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_MISSING_HOSTNAME_AND_INSTANCE_ID)                     if ( Helpers::Misc::isEmpty($opt->{'hostname'})    &&  Helpers::Misc::isEmpty($opt->{'instance_id'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_INVALID_AWS_EC2_INSTANCE_ID, $opt->{'instance_id'})   if (!Helpers::Misc::isEmpty($opt->{'instance_id'}) && !Helpers::AWS::isValidEC2InstanceId($opt->{'instance_id'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_INVALID_HOSTNAME)                                     if (!Helpers::Misc::isEmpty($opt->{'hostname'})    && !Helpers::AWS::isValidHostname($opt->{'hostname'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_MISSING_REGION)                                       if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_BAD_TERMINATION_LABEL)                                if (!Helpers::AWS::isSafeTagValue($opt->{'termination_label'}));
+
+  if ($opt->{'hostname'})
+    {
+        my $dptr_json = undef;
+        my $cmd = sprintf("aws-list-ec2-instances --region=%s --hostname=%s|", $opt->{'region'}, $opt->{'hostname'});
+        ($ret, $dptr_json) = Helpers::Misc::readFile($cmd);
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_AWS_CMD_FAILED) if (!$ret);
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_NO_INSTANCES, $opt->{'hostname'}, $opt->{'region'}) if ($$dptr_json eq '');
+
+        my $dptr = undef;
+        ($ret, $dptr) = Helpers::Misc::fromJSON($$dptr_json);
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_EC2_AWS_NO_JSON) if (!$ret);
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_NO_INSTANCES, $opt->{'hostname'}) if (!defined $dptr->{'InstanceId'});
+        $opt->{'instance_id'} = $dptr->{'InstanceId'};
+    }
+
+  my $cmd = sprintf("aws-set-ec2-tags --region=%s --instance-id=%s --tag=Name --value=%s", $opt->{'region'}, $opt->{'instance_id'}, $opt->{'termination_label'});
+  $ret = system($cmd);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to set a tearmination tag %s on instance %s in region %s scheduled for termination", $opt->{'termination_label'}, $opt->{'instance_id'}, $opt->{'region'}) if ($ret != 0 );
+
+  $cmd = sprintf("aws ec2 terminate-instances --region=%s --instance-ids %s |", $opt->{'region'}, $opt->{'instance_id'});
+  my $dptr_json = undef;
+  ($ret, $dptr_json) = Helpers::Misc::readFile($cmd);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to issue a termiantion command to AWS EC2 instance %s in region %s - AWS command failed", $opt->{'instance_id'}, $opt->{'region'}) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to terminate AWS EC2 instance %s in region %s - AWS API returned empty string", $opt->{'instance_id'}, $opt->{'region'}) if ($$dptr_json eq '');
+
+  my $dptr = undef;
+  ($ret, $dptr) = Helpers::Misc::fromJSON($$dptr_json);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to termiante AWS EC2 instance %s in region %s - Failed to convert returned JSON: %s", $opt->{'instance_id'}, $opt->{'region'}, $dptr_json) if (!$ret);
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to termiante AWS EC2 instance %s in region %s - AWS API data did not return TerminatingInstances node") if (!defined $dptr->{'TerminatingInstances'});
+  Helpers::Misc::display_and_exit(EXIT_SUCCESS, "AWS EC2 instance %s in region %s has been terminated", $opt->{'instance_id'}, $opt->{'region'});
+
+}
+
+exit(EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --hostname=<name>               Terminate an instance with hostname <hostname>\n");
+  printf("                                      Default: %s\n", $opt->{'hostname'});
+  printf("      --instance-id=<id>              Terminate an instance with instance id <id>\n");
+  printf("                                      Default: %s\n", $opt->{'instance_id'});
+  printf("      --region=<region>               Terminate an instance in AWS EC2 region <region>\n");
+  printf("                                      Default: %s\n", $opt->{'region'});
+  printf("      --termination-label=<label>     Assign the instance name <termination label> before termination\n");
+  printf("                                      Default: %s\n", $opt->{'termination-label'});
+  printf("      --help                          This help\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(EXIT_SUCCESS);
+}
