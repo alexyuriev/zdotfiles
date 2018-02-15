@@ -13,7 +13,7 @@ use JSON;
 use Helpers::Misc;
 
 BEGIN {
-  our $VERSION = "0.08";
+  our $VERSION = "0.09";
 }
 
 
@@ -46,8 +46,6 @@ my $AWS_EC2_RUN_STATES =  {
                             'stopped' => 1,
                             'terminated' => 1,
                           };
-
-
 
 sub isValidAMI
 {
@@ -129,6 +127,19 @@ sub isValidEC2InstanceId
   return 1 if ($instance_id eq '');
   return 0;
 }
+
+sub isSafeTagValue
+{
+  my $tag = shift @_;
+  return 0 if (!defined $tag);
+
+  $tag =~ s/[a-z]|[A-Z]//g;
+  $tag =~ s/[0-9]//g;
+  $tag =~ s/-|_|\.//g;
+  return 0 if ($tag ne '');
+  return 1;
+}
+
 # returns a pointer to a list of just instance Ids from AWS responses
 
 sub getInstanceIds
