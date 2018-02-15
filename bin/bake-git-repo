@@ -1,0 +1,232 @@
+#!/usr/bin/perl
+
+# bake-git-repo
+#
+# Runs a bake plan to combine portions of different repos into a single repo
+#
+# Version 0.0.10
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use POSIX;
+use File::Path;
+use Cwd;
+
+use Helpers::Logger;
+use Helpers::Misc;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_MISSIGN_CONFIG                    => "Cannot read configuration file %s: %s";
+use constant ERR_MSG_CONFIG_NOT_JSON                   => "Configuration file '%s' does not seem to be a JSON: %s";
+use constant ERR_MSG_CONFIG_MISSING_NODE               => "Configuration file '%s' is missing a node '%s'";
+
+our $logger = undef;
+our $saved_starting_dir = getcwd();
+
+{
+  my $opt = {
+                'TOOL_NAME'                     => qq(bake-git-repo),
+                'TOOL_DESC'                     => qq(Bakes a repo via partial merge),
+                'TOOL_VER_MAJOR'                => 0,
+                'TOOL_VER_MINOR'                => 0,
+                'TOOL_VER_PATCH'                => 9,
+                'config'                        => undef,
+                'verbose'                       => 0,
+                'help'                          => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $loggerConfig =  {
+                          'ident' => $opt->{'TOOL_NAME'},
+                          'loggers' => {
+                                          'stdout' => 1,
+                                          'stderr' => 0,
+                                       },
+                      };
+
+  my $ret = GetOptions(   "config=s"                        => \$opt->{'config'},
+                          "help"                            => \$opt->{'help'},
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  $opt->{'config'} = $opt->{'default_config'} if (Helpers::Misc::isEmpty($opt->{'config'}));
+  my $config_json_ptr = undef;
+
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSIGN_CONFIG, $opt->{'config'}) if ($opt->{'config'} ne $opt->{'default_config'});
+      $config_json_ptr = undef;
+    }
+
+  my $config = undef;
+  if (defined $config_json_ptr)
+    {
+      my $this_config = undef;
+      ($ret, $this_config) = Helpers::Misc::fromJSON($$config_json_ptr);
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $this_config) if (!$ret);
+
+      foreach my $f (qw/bake_git_repo/)
+        {
+          Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_NODE, $opt->{'TOOL_NAME'}, $opt->{'config'}, $f) if (Helpers::Misc::isEmpty($this_config->{$f}));
+        }
+      $config = $this_config->{'bake_git_repo'};
+    }
+
+  foreach my $f (qw/tmpdir/)
+    {
+      $config->{$f} = $opt->{$f} if (!Helpers::Misc::isEmpty($opt->{$f}));
+    }
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Need a configuration file") if (Helpers::Misc::isEmpty($config->{'bake_git_repo_config_version'}));
+
+  $config->{'tmpdir'} = "/tmp" if (Helpers::Misc::isEmpty($config->{'tmpdir'}));
+
+  # clone puppet
+
+  my $tmproot = $config->{'tmpdir'} . "/" . $opt->{'TOOL_NAME'} . "." . $$;
+  my $combined_dir_root = $tmproot . $config->{'combined_source_dir'};
+
+  my $build_dir  = $tmproot . "/" . $config->{'master_repo'}->{'repo_dir_name'} . "/" . $config->{'master_target_dir'};
+
+  $config->{'master_repo'}->{'skip_git'}  = 0;
+  $config->{'master_repo'}->{'skip_copy'} = 1;
+  $config->{'master_repo'}->{'repo_relative_dir'} = "./";
+
+#  foreach my $this_dir ($tmproot, $combined_dir_root)
+  foreach my $this_dir($tmproot)
+    {
+      if (! -d $this_dir)
+        {
+          $logger->log("Temporary directory %s does not exist, creating", $this_dir);
+          File::Path::make_path($this_dir, {'verbose' => 0,'mode' => 0700, 'error' => \$ret });
+          Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to create a temporary directory %s", $this_dir) if (scalar @$ret != 0);
+        }
+      File::Path::remove_tree($this_dir, { 'keep_root' => 1, 'error' => \$ret});
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to clean content of the temporary directory %s", $this_dir) if (scalar @$ret != 0);
+    }
+
+  foreach my $this_bake ($config->{'master_repo'}, @{$config->{'plan'}})
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to change directory to %s", $tmproot) if (!chdir($tmproot));
+      my $repo_dir = $tmproot . "/" . $this_bake->{'repo_dir_name'};
+
+      if (!$this_bake->{'skip_git'})
+        {
+          my $msg = undef;
+          ($ret, $msg) = clone_repo($this_bake);
+          Helpers::Misc::display_and_exit( EXIT_FAILURE, $msg) if (!$ret);
+        }
+
+      if (!defined $this_bake->{'skip_copy'} || !$this_bake->{'skip_copy'})
+        {
+          my $target_dir = $repo_dir . "/" . $this_bake->{'repo_relative_dir'};
+          Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to change into source dir %s for cloned stage %s", $target_dir, $this_bake->{'stage_name'}) if (!chdir($target_dir));
+
+          my $src = join(' ', @{$this_bake->{'source_files'}});
+          my $dst = $combined_dir_root . "/" . $this_bake->{'target_dir'};
+
+          if (! -d $dst)
+            {
+              $logger->log("Target directory %s does not exist, creating", $dst);
+              File::Path::make_path($dst, {'verbose' => 0,'mode' => 0700, 'error' => \$ret });
+              Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to create a target directory %s", $dst) if (scalar @$ret != 0);
+            }
+
+          $logger->log("Current working directory %s", $target_dir);
+          my $cmd = sprintf("cp -rv %s %s", $src, $dst);
+          $logger->log("Copy command is %s", $cmd);
+          $ret = system($cmd);
+          Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to copy needed files for stage %s to directory %s", $this_bake->{'stage_name'}, $dst) if ($ret != 0);
+        }
+    }
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to change director to %s", $build_dir) if (!chdir($build_dir));
+
+  $logger->log("New directory is %s", $build_dir);
+
+  $ret = system("git add -A");
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to add merged files to the puppet repo") if ($ret != 0);
+
+  $ret = system(sprintf("git diff-index --quiet HEAD || git commit -m '%s: sync at %s'", $opt->{'TOOL_NAME'}, get_when_string()));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to commit merged sync'ed files to the puppet repo") if ($ret != 0);
+
+  $ret = system("git push");
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to push updated puppet master repo %s branch master", $config->{'master_repo'}->{'repo'}) if ($ret != 0);
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to change directory back to starting directory %s", $saved_starting_dir) if (!chdir($saved_starting_dir));
+
+  File::Path::remove_tree($tmproot, { 'keep_root' => 0, 'error' => \$ret});
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to clean content of the temporary directory %s", $tmproot) if (scalar @$ret != 0);
+
+  Helpers::Misc::display_and_exit( EXIT_SUCCESS, "%s repository has been updated with the latest code from other projects", $config->{'master_repo'}->{'repo'});
+
+  exit(EXIT_SUCCESS);
+
+}
+
+exit(EXIT_FAILURE);
+
+sub get_when_string
+{
+  return (strftime("%Y-%m-%d %H:%M:%S %Z", localtime()));
+}
+
+sub clone_repo
+{
+
+  my $repo = shift @_;
+
+  my $cmd = sprintf("git clone --depth 1 %s", $repo->{'repo'});
+  my $ret = system($cmd);
+  return (1, "ok") if ($ret == 0);
+  return (0, sprintf("Failed to shallow clone repo %s needed for stage %s", $repo->{'repo'}, $repo->{'stage_name'}));
+}
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --config=<config.json>                  Read configuration from <config.json>\n");
+  printf("                                              Default: %s\n", $opt->{'default_config'});
+  printf("      --tmpdir=<dir>                          Use directory <tmpdir> as a temporary directory\n");
+  printf("                                              Default: %s\n", $opt->{'tmpdir'});
+  printf("      --verbose                               Be more verbose\n");
+  printf("                                              Default: No\n");
+  printf("      --help                                  This help\n\n");
+
+  exit(EXIT_FAILURE);
+}
