@@ -41,14 +41,10 @@ aws-srv-ip|Gets an IP address of a specific AWS EC2 instance
 aws-list-ec2-instances|Lists AWS EC2 instances in a format easily consumable by other tools
 aws-wait-ec2-instance-state|Waits for a specific instance to reach a specific state
 aws-destroy-ec2-instance|Destroys a running AWS EC2 instance after renaming it to a specific string
-
 aws-create-iam-user|Creates AWS IAM user
 aws-list-iam-policies|Lists AWS IAM policies in a format easily consumable by other tools
-
-
 aws-create-ec2-sec-group|Creates an AWS EC2 Security group
 aws-list-ec2-sec-groups|Lists AWS EC2 Security groups in a format easily consumable by other tools
 aws-edit-ec2-sec-group|Manipulates individual rules in the AWS EC2 security group
-
 aws-save-ec2-tags|Stores value of AWS EC2 instance tags in a file
 aws-set-ec2-tags|Sets a specific tag on an AWS EC instance
