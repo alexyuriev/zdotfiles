@@ -13,7 +13,7 @@ use JSON;
 use Helpers::Misc;
 
 BEGIN {
-  our $VERSION = "0.09";
+  our $VERSION = "0.10";
 }
 
 
@@ -135,7 +135,7 @@ sub isSafeTagValue
 
   $tag =~ s/[a-z]|[A-Z]//g;
   $tag =~ s/[0-9]//g;
-  $tag =~ s/-|_|\.//g;
+  $tag =~ s/-|_|:|\.//g;
   return 0 if ($tag ne '');
   return 1;
 }
