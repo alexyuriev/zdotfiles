@@ -4,7 +4,7 @@
 #
 # Runs a bake plan to combine portions of different repos into a single repo
 #
-# Version 0.0.10
+# Version 0.0.11
 
 use strict;
 use warnings;
@@ -42,7 +42,7 @@ use constant EXIT_SUCCESS => 0;
 
 use constant ERR_MSG_MISSIGN_CONFIG                    => "Cannot read configuration file %s: %s";
 use constant ERR_MSG_CONFIG_NOT_JSON                   => "Configuration file '%s' does not seem to be a JSON: %s";
-use constant ERR_MSG_CONFIG_MISSING_NODE               => "Configuration file '%s' is missing a node '%s'";
+use constant ERR_MSG_CONFIG_MISSING_NODE               => "Configuration file '%s' is missing a node '%s' in file %s";
 
 our $logger = undef;
 our $saved_starting_dir = getcwd();
@@ -53,7 +53,7 @@ our $saved_starting_dir = getcwd();
                 'TOOL_DESC'                     => qq(Bakes a repo via partial merge),
                 'TOOL_VER_MAJOR'                => 0,
                 'TOOL_VER_MINOR'                => 0,
-                'TOOL_VER_PATCH'                => 9,
+                'TOOL_VER_PATCH'                => 11,
                 'config'                        => undef,
                 'verbose'                       => 0,
                 'help'                          => 0,
@@ -97,7 +97,7 @@ our $saved_starting_dir = getcwd();
 
       foreach my $f (qw/bake_git_repo/)
         {
-          Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_NODE, $opt->{'TOOL_NAME'}, $opt->{'config'}, $f) if (Helpers::Misc::isEmpty($this_config->{$f}));
+          Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_NODE, $opt->{'TOOL_NAME'}, $f, $opt->{'config'}) if (Helpers::Misc::isEmpty($this_config->{$f}));
         }
       $config = $this_config->{'bake_git_repo'};
     }
