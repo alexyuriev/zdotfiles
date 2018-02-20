@@ -4,7 +4,7 @@
 #
 # Destroys (after renaming) an EC2 instance
 #
-# Version 0.0.1
+# Version 0.0.2
 
 use strict;
 use warnings;
@@ -56,10 +56,10 @@ our $logger = undef;
 
   my $opt = {
                 'TOOL_NAME'               => qq(aws-destroy-ec2-instance),
-                'TOOL_DESC'               => qq(Destorys AWS instance after renaming it),
+                'TOOL_DESC'               => qq(Destroys AWS instance after renaming it),
                 'TOOL_VER_MAJOR'          => 0,
                 'TOOL_VER_MINOR'          => 0,
-                'TOOL_VER_PATCH'          => 1,
+                'TOOL_VER_PATCH'          => 2,
                 'region'                  => undef,
                 'hostname'                => undef,
                 'instance_id'             => undef,
@@ -111,7 +111,7 @@ our $logger = undef;
         my $dptr = undef;
         ($ret, $dptr) = Helpers::Misc::fromJSON($$dptr_json);
         Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_EC2_AWS_NO_JSON) if (!$ret);
-        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_NO_INSTANCES, $opt->{'hostname'}) if (!defined $dptr->{'InstanceId'});
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_NO_INSTANCES, $opt->{'hostname'}, $opt->{'region'}) if (!defined $dptr->{'InstanceId'});
         $opt->{'instance_id'} = $dptr->{'InstanceId'};
     }
 
