@@ -236,7 +236,7 @@ sub display_help_and_exit
   printf("                         Default: no\n");
   printf("      --stdout-json      Output results as a JSON - used for creating pipelines\n");
   printf("                         Default: no\n");
-  printf("      --table            Output results as a table\n")
+  printf("      --table            Output results as a table\n");
   printf("                         Default: no\n");
   printf("      --help             This help\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
