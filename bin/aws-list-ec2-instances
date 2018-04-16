@@ -5,7 +5,7 @@
 # Extract useful information from aws ec2 describe instances
 # Requires configured aws tool
 #
-# Version 0.0.14
+# Version 0.0.15
 
 use strict;
 use warnings;
@@ -35,6 +35,9 @@ use Helpers::Logger;
 use Helpers::Misc;
 use Helpers::AWS;
 
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
 use constant ERR_MSG_ARGUMENT_CONFLICT         => qq(Command arguments --instance-id and --hostname cannot be combined. Use only one);
 use constant ERR_MSG_NO_REGIONS                => qq(Can't get a list of known AWS EC2 regions: %s);
 use constant ERR_MSG_UNKNOWN_REGION            => qq(Unknown AWS EC2 region %s);
@@ -53,13 +56,14 @@ our $logger = undef;
                 'TOOL_DESC'       => qq(Lists AWS EC2 instances),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 14,
+                'TOOL_VER_PATCH'  => 15,
                 'regions'         => undef,
                 'instance_id'     => undef,
                 'hostname'        => undef,
                 'with_tags'       => 0,
                 'single_instance' => 0,
                 'stdout_json'     => 0,
+                'table'           => 0,
                 'list_all'        => 0,
                 'help'            => 0,
             };
@@ -72,6 +76,7 @@ our $logger = undef;
                           "instance-id=s" => \$opt->{'instance_id'},
                           "hostname=s"    => \$opt->{'hostname'},
                           "stdout-json"   => \$opt->{'stdout_json'},
+                          "table"         => \$opt->{'table'},
                           "all"           => \$opt->{'list_all'},
                           "help"          => \$opt->{'help'}
                       );
@@ -180,6 +185,12 @@ our $logger = undef;
         }
     }
 
+  if ($opt->{'table'})
+    {
+      result_as_table(\@all_instances);
+      exit( EXIT_SUCCESS );
+    }
+
   my $ptr = undef;
   if (my $total_instances = scalar @all_instances)
     {
@@ -199,10 +210,10 @@ our $logger = undef;
   ($ret, $object_json) = Helpers::Misc::toJSON($result_obj, {'pretty' => 1, 'undef_ok' => 1 });
   print $object_json;
 
-  exit(0);
+  exit(EXIT_SUCCESS);
 }
 
-exit(0);
+exit(EXIT_FAILURE);
 
 sub display_help_and_exit
 {
@@ -224,9 +235,37 @@ sub display_help_and_exit
   printf("      --all              Include instrances in the 'Terminated' state\n");
   printf("                         Default: no\n");
   printf("      --stdout-json      Output results as a JSON - used for creating pipelines\n");
+  printf("                         Default: no\n");
+  printf("      --table            Output results as a table\n");
+  printf("                         Default: no\n");
   printf("      --help             This help\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
 
-  exit(0);
+  exit(EXIT_SUCCESS);
+
+}
+
+sub result_as_table
+{
+  my $instance_list_ptr = shift @_;
+
+  my $i = 0;
+  my $extra_space = '                         ';
+  foreach my $t (@$instance_list_ptr)
+    {
+      foreach my $k (qw/PublicIp PrivateIp InstanceId RunSate ServerName AZ/)
+        {
+          if (defined $t->{$k})
+            {
+              $t->{$k} .= $extra_space;
+            }
+          else
+            {
+              $t->{$k} = $extra_space;
+            }
+        }
+      $i++;
+      printf("%3d| %.20s | %.10s | %.15s | %.15s | %.15s\n", $i, $t->{'ServerName'}, $t->{'AZ'}, $t->{'PublicIp'}, $t->{'PrivateIp'}, $t->{'RunState'});
+    }
 
 }
