@@ -5,7 +5,7 @@
 # Saves AWS EC2 tags
 # Requires configured aws tool
 #
-# Version 0.0.1
+# Version 0.0.2
 
 use strict;
 use warnings;
@@ -53,7 +53,7 @@ use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to va
                 'TOOL_DESC'       => qq(Saves tags from AWS EC2 instance to a file),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 1,
+                'TOOL_VER_PATCH'  => 2,
                 'tag'             => undef,
                 'mode'            => 0600,
                 'output_file'     => undef,
@@ -132,7 +132,7 @@ sub display_help_and_exit
   printf("      --tag=<tag>                Get tag <tag>\n");
   printf("                                 Default: %s\n", $opt->{'tag'});
   printf("      --output-file=<filename>   Write tag value into file <filename>\n");
-  printf("                                 Default: %s\n", $opt->{'value'});
+  printf("                                 Default: %s\n", $opt->{'output_file'});
   printf("      --help                     This help\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
 
