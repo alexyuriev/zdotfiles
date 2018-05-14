@@ -248,7 +248,7 @@
 
     <keybind key="C-A-s">
       <action name="Execute">
-        <command>sublime_text</command>
+        <command>/opt/bin/sublime_text</command>
       </action>
     </keybind>
 
