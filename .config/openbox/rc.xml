@@ -1,34 +1,34 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<!-- 
+<!--
 
   "$HOME/.config/openbox/rc.xml"
-  
+
   This is just a current version of the OpenBox configration file.
   It is a result of tweaking the default config to work on a laptop
   with 4K screen which sometimes is attached to a second 4K screen.
-  
+
   The laptop is currently running Debian 8 under Lightdm and Openbox.
   The most used set of applications are:
-  
+
   	* xterm ( lots of different configurations )
   	* Chromium ( web browser )
   	* mc ( file manager )
   	* gnome-screenshot ( screen shotter )
   	* sublime_text 3 ( serious editor )
   	* joe ( quick editor )
-  
-  If both laptop and external screens are used they are setup in the 
+
+  If both laptop and external screens are used they are setup in the
   following ways:
-       
+
   ++++++++++ ++++++++++
   | laptop | |external|
   ++++++++++ ++++++++++
-  
+
   Remember to reload configuration after editing this file.
-    
+
   * Alexander O. Yuriev (github.com/alexyuriev)
-  
+
 -->
 
 <openbox_config xmlns="http://openbox.org/3.4/rc" xmlns:xi="http://www.w3.org/2001/XInclude">
@@ -207,7 +207,7 @@
         <command>dm-tool lock</command>
       </action>
     </keybind>
-    
+
     <!-- Ctrl-Alt-B : battery status -->
     <keybind key="C-A-b">
       <action name="Execute">
@@ -237,8 +237,6 @@
       </action>
     </keybind>
 
-
-
     <!-- Ctrl-Alt-C : Coding workspace workspace -->
     <keybind key="C-A-c">
       <action name="Execute">
@@ -246,14 +244,13 @@
       </action>
     </keybind>
 
-    <!-- Ctrl-Alt-T - setup text terminals -->
+    <!-- Ctrl-Alt-S: run sublime -->
 
-    <keybind key="C-A-t">
+    <keybind key="C-A-s">
       <action name="Execute">
-        <command>configure-text-single-screen</command>
+        <command>sublime_text</command>
       </action>
     </keybind>
-
 
     <keybind key="W-x">
 
@@ -272,37 +269,6 @@
           <command>xterm-basic-larger</command>
         </action>
       </keybind>
-
-      <!-- L terminals -->
-
-      <keybind key="W-l">
-
-        <keybind key="W-p">
-          <action name="Execute">
-            <command>xterm-pmaster</command>
-          </action>
-        </keybind>
-
-      </keybind>
-
-      <!-- Z terminals -->
-
-      <keybind key="W-z">
-
-        <keybind key="W-d">
-          <action name="Execute">
-            <command>xterm-zdef</command>
-          </action>
-        </keybind>
-
-        <keybind key="W-o">
-          <action name="Execute">
-            <command>xterm-zops</command>
-          </action>
-        </keybind>
-
-      </keybind>
-
 
     </keybind>
 
