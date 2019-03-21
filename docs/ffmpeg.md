@@ -1,6 +1,9 @@
 # ffmpeg useful notes
 
-### Extract 30 seconds of a video starting at 1 minute
+### Extract a section from a file.
 
-``ffmpeg -i input.mp4 -s 00:01:00 -t 00:00:30 -o output.mp4``
+Extracts 30 seconds of a video from input.mp4 starting at 1 minute and
+writes the result to output.mp4
+
+``ffmpeg -i input.mp4 -ss 00:01:00 -t 30 output.mp4``
 
