@@ -4,7 +4,7 @@
 #
 # Runs a bake plan to combine portions of different repos into a single repo
 #
-# Version 0.0.11
+# Version 0.0.12
 
 use strict;
 use warnings;
@@ -53,8 +53,11 @@ our $saved_starting_dir = getcwd();
                 'TOOL_DESC'                     => qq(Bakes a repo via partial merge),
                 'TOOL_VER_MAJOR'                => 0,
                 'TOOL_VER_MINOR'                => 0,
-                'TOOL_VER_PATCH'                => 11,
+                'TOOL_VER_PATCH'                => 12,
                 'config'                        => undef,
+                'bake-only'                     => 0,
+                'tmpdir'                        => "/tmp",
+                'baked-dir-location'            => undef,
                 'verbose'                       => 0,
                 'help'                          => 0,
             };
@@ -71,6 +74,9 @@ our $saved_starting_dir = getcwd();
                       };
 
   my $ret = GetOptions(   "config=s"                        => \$opt->{'config'},
+                          "bake-only"                       => \$opt->{'bake-only'},
+                          "baked-dir-location=s"            => \$opt->{'baked-dir-location'},
+                          "tmpdir=s"                        => \$opt->{'tmpdir'},
                           "help"                            => \$opt->{'help'},
                       );
 
@@ -84,7 +90,7 @@ our $saved_starting_dir = getcwd();
   ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
   if (!$ret)
     {
-      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSIGN_CONFIG, $opt->{'config'}) if ($opt->{'config'} ne $opt->{'default_config'});
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSIGN_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'config'} ne $opt->{'default_config'});
       $config_json_ptr = undef;
     }
 
@@ -121,6 +127,22 @@ our $saved_starting_dir = getcwd();
   $config->{'master_repo'}->{'skip_git'}  = 0;
   $config->{'master_repo'}->{'skip_copy'} = 1;
   $config->{'master_repo'}->{'repo_relative_dir'} = "./";
+  if ($config->{'master_repo'}->{'bake_only'})
+    {
+      if ((     $config->{'master_repo'}->{'bake_only'} eq "0")
+            ||  $config->{'master_repo'}->{'bake_only'} == 0)
+        {
+          delete $config->{'master_repo'}->{'bake_only'};
+        }
+    }
+  $config->{'master_repo'}->{'bake_only'} = 1 if ($opt->{'bake-only'});
+
+  # bake location only matters if the this is a bake-only
+
+  if (!Helpers::Misc::isEmpty($opt->{'baked-dir-location'}) && !$config->{'master_repo'}->{'bake-only'})
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, "--baked-dir-location can only be used with --bake-only");
+    }
 
 #  foreach my $this_dir ($tmproot, $combined_dir_root)
   foreach my $this_dir($tmproot)
@@ -174,11 +196,25 @@ our $saved_starting_dir = getcwd();
 
   $logger->log("New directory is %s", $build_dir);
 
+  if ($config->{'master_repo'}->{'bake-only'})
+    {
+      if (!Helpers::Misc::isEmpty($opt->{'baked-dir-location'}))
+        {
+          my $r = undef;
+          ($ret, $r) = Helpers::Misc::writeFile($opt->{'baked-dir-location'}, $build_dir . "\n");
+          Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to save a location of the baked repo '%s' in %s: %s", $build_dir, $opt->{'baked-dir-location'}, $r) if (!$ret);
+          Helpers::Misc::display_and_exit( EXIT_SUCCESS, "Finished bake-only run. Location written to %s", $opt->{'baked-dir-location'});
+
+        }
+
+      Helpers::Misc::display_and_exit( EXIT_SUCCESS, "Bake-only requested, stopping here");
+    }
+
   $ret = system("git add -A");
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to add merged files to the puppet repo") if ($ret != 0);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to add merged files to the baked repo") if ($ret != 0);
 
   $ret = system(sprintf("git diff-index --quiet HEAD || git commit -m '%s: sync at %s'", $opt->{'TOOL_NAME'}, get_when_string()));
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to commit merged sync'ed files to the puppet repo") if ($ret != 0);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to commit merged sync'ed files to the baked repo repo") if ($ret != 0);
 
   $ret = system("git push");
   Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to push updated puppet master repo %s branch master", $config->{'master_repo'}->{'repo'}) if ($ret != 0);
@@ -224,8 +260,10 @@ sub display_help_and_exit
   printf("                                              Default: %s\n", $opt->{'default_config'});
   printf("      --tmpdir=<dir>                          Use directory <tmpdir> as a temporary directory\n");
   printf("                                              Default: %s\n", $opt->{'tmpdir'});
-  printf("      --verbose                               Be more verbose\n");
+  printf("      --bake-only                             Do not push the repo after merging. Used for deploy prep.\n");
   printf("                                              Default: No\n");
+  printf("      --baked-dir-location=<filename>         Write location of the baked repo to file <filename>.\n");
+  printf("                                              Only valid in combination with --bake-only.\n");
   printf("      --help                                  This help\n\n");
 
   exit(EXIT_FAILURE);
