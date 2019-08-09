@@ -12,7 +12,7 @@ use Cwd;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.18";
+  our $VERSION = "0.19";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -401,6 +401,19 @@ sub collapse_spaces
 sub perl_function
 {
   return (caller(1))[3];
+}
+
+# sanitizePath collapses certain annoying patterns
+
+sub sanitizePath
+{
+  my $p = shift @_;
+  return undef if (!defined $p);
+
+  $p =~ s/\/+/\//g;   # collapse multiple / into a single slash
+  $p =~ s/\/\.\/$//g; # strip /./ at the end of a sanitizePath
+
+  return $p;
 }
 
 

@@ -122,7 +122,7 @@ our $saved_starting_dir = getcwd();
   my $tmproot = $config->{'tmpdir'} . "/" . $opt->{'TOOL_NAME'} . "." . $$;
   my $combined_dir_root = $tmproot . $config->{'combined_source_dir'};
 
-  my $build_dir  = $tmproot . "/" . $config->{'master_repo'}->{'repo_dir_name'} . "/" . $config->{'master_target_dir'};
+  my $build_dir  = Helpers::Misc::sanitizePath($tmproot . "/" . $config->{'master_repo'}->{'repo_dir_name'} . "/" . $config->{'master_target_dir'});
 
   $config->{'master_repo'}->{'skip_git'}  = 0;
   $config->{'master_repo'}->{'skip_copy'} = 1;
