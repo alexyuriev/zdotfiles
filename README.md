@@ -28,7 +28,7 @@ take-screenshot|Takes a screen shot of an area
 tmux-dev-workspace|Sets up a tmux workspace ( 3 windows )
 url-2-file|Stores content of the URL in a file using easily assembleable configuration
 x-workspace-setup-code|Called by the X manager to create a single work environment
-
+bin/extra-non-matching-lines|Displays the lines in a file that do not have equivalent lines in another file
 
 ### AWS manipulation utilities
 
