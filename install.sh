@@ -48,7 +48,7 @@ AWSTOOLS=$(eval $CMD)
 echo "AWSTOOLS = $AWSTOOLS"
 
 	  
-MISCBINS="batcheck randompass take-screenshot show-my-external-ipv4 gitup url-2-file"
+MISCBINS="batcheck randompass take-screenshot show-my-external-ipv4 gitup url-2-file extra-non-matching-lines"
 ROOTDOTFILES=".curlrc .bash_profile .nvidia-settings-rc .compton.conf .Xresources .xbindkeysrc"
 PROFILEDFILES="opt.sh"
 CONFIGOPENBOX="rc.xml"
