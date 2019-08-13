@@ -1,0 +1,132 @@
+#!/usr/bin/perl
+
+# extract-non-matching-lines
+#
+# Extracts lines from the second file that do not exist in the first file
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use LWP::UserAgent;
+
+use Helpers::Misc;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+{
+
+  my $opt = {
+                'TOOL_NAME'       => qq(extract-non-matching-lines),
+                'TOOL_DESC'       => qq(Extract lines from the second file that don't match first),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 1,
+                'file-name'       => undef,
+                'compare-against' => undef,
+                'verbose'         => 0,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+
+  my $ret = GetOptions(   "file-name=s"         => \$opt->{'file-name'},
+                          "compare-against=s"   => \$opt->{'compare-against'},
+                          "help"                => \$opt->{'help'},
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, qq(Need a file name to compare. --help for help))         if (Helpers::Misc::isEmpty($opt->{'file-name'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, qq(Need a file name to compare against. --help for help)) if (Helpers::Misc::isEmpty($opt->{'compare-against'}));
+
+  my $master_hash = undef;
+  ($ret, $master_hash) = fileToHash($opt->{'compare-against'});
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, $master_hash) if (!$ret);
+
+  my $check_hash = undef;
+  ($ret, $check_hash) = fileToHash($opt->{'file-name'});
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, $check_hash) if (!$ret);
+
+  my @not_matched = ();
+  foreach my $key (keys %$check_hash)
+    {
+      push @not_matched, $key if (!$master_hash->{$key});
+    }
+
+  if (scalar @not_matched)
+    {
+      printf("The following lines from file %s have no match in file %s:\n\n", $opt->{'file-name'}, $opt->{'compare-against'});
+      foreach my $line (@not_matched)
+        {
+          print "$line\n";
+        }
+      exit( EXIT_SUCCESS)
+    }
+
+  printf("All of the strings from file %s exist in a file %s\n", $opt->{'file-name'}, $opt->{'compare-against'});
+  exit(EXIT_SUCCESS);
+}
+
+
+exit(EXIT_FAILURE);
+
+sub fileToHash
+{
+  my $fname = shift @_;
+
+  my ($ret, $dptr) = Helpers::Misc::readFile($fname);
+  return ($ret, sprintf("Can't process %s: %s", $fname, $dptr)) if (!$ret);
+
+  my @master = split("\n", $$dptr);
+
+  my $master_hash = undef;
+  foreach my $line (@master)
+    {
+      $master_hash->{$line} = 1;
+    }
+  return (1, $master_hash);
+
+}
+
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --compare-against=<master>  Look for matching lines in a file <master>\n");
+  printf("                                  Default: %s\n", $opt->{'compare-against'});
+  printf("      --file-name=<file>          Test strings in file <file>\n");
+  printf("                                  Default: %s\n", $opt->{'file-name'});
+  printf("      --help                      This help\n");
+
+  exit(EXIT_FAILURE);
+
+}
