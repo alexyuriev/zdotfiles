@@ -28,7 +28,7 @@ DSTHELPERLIBDIR=${DSTDIR}/${SRCHELPERLIBDIR}
 
 SRCBINDIR=bin
 
-HELPERLIBS="AWS.pm Misc.pm Logger.pm"
+HELPERLIBS="AWS.pm Misc.pm Logger.pm RedisClient.pm"
 AWSTOOLS="aws-build-ec2-instance 	
 	  aws-srv-ip 			
 	  aws-list-ec2-instances 	
@@ -48,7 +48,7 @@ AWSTOOLS=$(eval $CMD)
 echo "AWSTOOLS = $AWSTOOLS"
 
 	  
-MISCBINS="batcheck randompass take-screenshot show-my-external-ipv4 gitup url-2-file extra-non-matching-lines"
+MISCBINS="batcheck randompass take-screenshot show-my-external-ipv4 gitup url-2-file extra-non-matching-lines sre-push-to-redis-queue"
 ROOTDOTFILES=".curlrc .bash_profile .nvidia-settings-rc .compton.conf .Xresources .xbindkeysrc"
 PROFILEDFILES="opt.sh"
 CONFIGOPENBOX="rc.xml"
