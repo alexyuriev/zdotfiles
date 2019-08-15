@@ -1,0 +1,155 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long;
+use FileHandle;
+
+use Helpers::RedisClient;
+use Helpers::Misc;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file `%s` is missing a node `%s`);
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file `%s` is missing field `%s` in node `%s`);
+
+{
+
+  my $opt = {
+              'TOOL_NAME'      => qq(sre-push-to-redis-queue),
+              'TOOL_DESC'      => qq(Stores lines from file in a redis queue),
+              'TOOL_VER_MAJOR' => 0,
+              'TOOL_VER_MINOR' => 0,
+              'TOOL_VER_PATCH' => 1,
+              'config'          => undef,
+              'queue_name'     => undef,
+              'input_file'     => undef,
+              'redis_config'   => undef,
+              'verbose'        => 1,
+              'help'           => 0
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $ret = GetOptions( "queue-name=s"  => \$opt->{'queue-name'},
+                        "input-file=s"  => \$opt->{'input-file'},
+                        "config=s"      => \$opt->{'config'},
+                        "verbose"       => \$opt->{'verbose'},
+                        "help"          => \$opt->{'help'}
+                  );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  $opt->{'config'} = $opt->{'default_config'} if (Helpers::Misc::isEmpty($opt->{'config'}));
+  my $config_json_ptr = undef;
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'config'} ne $opt->{'default_config'});
+      $config_json_ptr = undef;
+    }
+
+  my $config = undef;
+  if (defined $config_json_ptr)
+    {
+      ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+    }
+
+  foreach my $f (qw/redis/)
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_NODE, $opt->{'config'}, $f) if (Helpers::Misc::isEmpty($config->{$f}));
+    }
+
+  foreach my $f (qw/hostname password db port/)
+    {
+      my $p = 'redis';
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_FIELD, $opt->{'config'}, $f, $p) if (Helpers::Misc::isEmpty($config->{$p}->{$f}));
+    }
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Need a name of the queue to push to. $0 --help for help))         if (Helpers::Misc::isEmpty($opt->{'queue-name'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Need a name of the file with the queue data. $0 --help for help)) if (Helpers::Misc::isEmpty($opt->{'input-file'}));
+
+  foreach my $f (keys %$opt)
+    {
+      $config->{$f} = $opt->{$f} if (defined $opt->{$f});
+    }
+
+  my $redis = undef;
+  ($ret, $redis) = Helpers::RedisClient::getRedisConnection($config->{'redis'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, $redis) if (!$ret);
+
+  my $fh = FileHandle->new($opt->{'input-file'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Can't open file %s : %s), $opt->{'input-file'}, $_) if (!defined $fh);
+
+  my $count = 0;
+  while ( my $line = <$fh>)
+    {
+      chomp $line;
+
+      printf("Pushing line %s to queue %s ...\n", $line, $opt->{'queue-name'}) if ($opt->{'verbose'});
+
+      my $errmsg = undef;
+      ($ret, $errmsg) = Helpers::RedisClient::queue_add_element($redis, $opt->{'queue-name'} , $line);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, qq(Failed to push an element `%s` to queue `%s` : %s", $line, $opt->{'queue-name'}, $errmsg)) if (!$ret);
+      $count++;
+    }
+  printf("Pushed %s elements into queue %s", $count, $opt->{'queue-name'});
+  $fh->close();
+
+  exit(EXIT_SUCCESS);
+}
+
+exit(EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("  --queue-name=<queuename>         Set Name of the REDIS queue to push the content to <queuename>.\n");
+  printf("                                   Default: %s\n", $opt->{'queue_name'});
+  printf("  --input-file=<filename>          Read the content to push to the queue from <filename>.\n");
+  printf("                                   Default: %s\n", $opt->{'input_file'});
+  printf("  --config=<config.json>           Read redis server configuration from <config.json> file\n");
+  printf("                                   Default: %s\n", $opt->{'redis_config'});
+  printf("  --verbose                        Display progress information on screen\n");
+  printf("                                   Default: No\n");
+  printf("  --help                           This help.\n\n");
+
+  exit(EXIT_FAILURE);
+}
+
+

@@ -1,0 +1,31 @@
+{
+    "bake_git_repo":
+        {
+            "bake_git_repo_config_version": "1",
+            "tmpdir": "/tmp",
+            "combined_source_dir" : "/zdotfiles",
+            "master_target_dir"   : "./",
+            "master_repo":
+                {
+                        "stage_name"        : "zdotfiles clone",
+                        "repo"              : "git@github.com:alexyuriev/zdotfiles.git",
+                        "repo_dir_name"     : "zdotfiles"
+                },
+            "plan":
+                [
+                    {
+                        "stage_name"        : "perl Helpers::*",
+                        "repo"              : "git@github.com:zubrcom/perl-helper-libs",
+                        "repo_dir_name"     : "perl-helper-libs",
+                        "skip_git"          : "0",
+                        "repo_relative_dir" : "./",
+                        "source_files"      :   [
+                                                    "lib/Helpers/AWS.pm",
+                                                    "lib/Helpers/RedisClient.pm",
+                                                    "lib/Helpers/Misc.pm"
+                                                ],
+                        "target_dir"        : "bin/lib/Helpers/"
+                    }
+                ]
+        }
+}
