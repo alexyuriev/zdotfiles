@@ -29,6 +29,7 @@ tmux-dev-workspace|Sets up a tmux workspace ( 3 windows )
 url-2-file|Stores content of the URL in a file using easily assembleable configuration
 x-workspace-setup-code|Called by the X manager to create a single work environment
 bin/extra-non-matching-lines|Displays the lines in a file that do not have equivalent lines in another file
+bin/sre-push-to-redis-queue - Pushes lines of a file into a Redis queue.
 
 ### AWS manipulation utilities
 
@@ -48,3 +49,9 @@ aws-list-ec2-sec-groups|Lists AWS EC2 Security groups in a format easily consuma
 aws-edit-ec2-sec-group|Manipulates individual rules in the AWS EC2 security group
 aws-save-ec2-tags|Stores value of AWS EC2 instance tags in a file
 aws-set-ec2-tags|Sets a specific tag on an AWS EC instance
+
+
+### Note:
+---------
+
+Some of the tools in this repo rely on a private ``perl-helper-libs`` repo. The to build a release ``config-bake-git-repo.zdotfiles.json`` is provided.
