@@ -4,7 +4,7 @@
 #
 # Destroys (after renaming) an EC2 instance
 #
-# Version 0.0.2
+# Version 0.0.3
 
 use strict;
 use warnings;
@@ -59,7 +59,7 @@ our $logger = undef;
                 'TOOL_DESC'               => qq(Destroys AWS instance after renaming it),
                 'TOOL_VER_MAJOR'          => 0,
                 'TOOL_VER_MINOR'          => 0,
-                'TOOL_VER_PATCH'          => 2,
+                'TOOL_VER_PATCH'          => 3,
                 'region'                  => undef,
                 'hostname'                => undef,
                 'instance_id'             => undef,
@@ -151,7 +151,7 @@ sub display_help_and_exit
   printf("      --region=<region>               Terminate an instance in AWS EC2 region <region>\n");
   printf("                                      Default: %s\n", $opt->{'region'});
   printf("      --termination-label=<label>     Assign the instance name <termination label> before termination\n");
-  printf("                                      Default: %s\n", $opt->{'termination-label'});
+  printf("                                      Default: %s\n", $opt->{'termination_label'});
   printf("      --help                          This help\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
 
