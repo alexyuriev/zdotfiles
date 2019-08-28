@@ -12,7 +12,7 @@ use Cwd;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.19";
+  our $VERSION = "0.20";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -154,6 +154,19 @@ sub isEmpty
 
   return $r;
 }
+
+sub isStringOctal
+{
+  my $str = shift @_;
+
+  return 0 if (isEmpty($str));
+  return 0 if (substr($str, 0, 1 ne '0'));
+
+  $str =~ s/[0-7]+//g;
+  return 0 if ($str ne '');
+  return 1;
+}
+
 
 sub fromJSON
 {

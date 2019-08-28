@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = "0.6";
+  our $VERSION = "0.7";
 }
 
 use strict;
@@ -114,6 +114,23 @@ sub discard {
   return (1, $v);
 }
 
+sub del {
+  my $redis = shift @_;
+  my $key   = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS,  $pf_name)) if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,    $pf_name)) if (Helpers::Misc::isEmpty($key));
+
+  my $v = undef;
+  eval  {
+          $v = $redis->send_command("del", $key);
+        };
+  return (0, $@) if ($@);
+  return (1, $v);
+}
+
 
 sub queue_move_element
 {
@@ -146,6 +163,17 @@ sub queue_safe_load_element
   return (0, sprintf(ERROR_REDIS_NO_KEY,   $pf_name)) if (Helpers::Misc::isEmpty($q_name));
 
   my ($ret, $v) = queue_move_element($redis, $q_name, $q_name);
+}
+
+sub lpush
+{
+  my $redis  = shift @_;
+  my $q_name = shift @_;
+  my $elem   = shift @_;
+
+  my ($ret, $r) = queue_add_element($redis, $q_name, $elem);
+  return ($ret, $r);
+
 }
 
 sub queue_add_element
@@ -187,6 +215,23 @@ sub queue_remove_element
   return (0, sprintf(ERROR_REDIS_ERROR, $pf_name, $@)) if ($@);
   return (1, $r);
 }
+
+sub lrem
+{
+  my $redis  = shift @_;
+  my $q_name = shift @_;
+  my $elem   = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS,   $pf_name)) if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,     $pf_name)) if (Helpers::Misc::isEmpty($q_name));
+  return (0, sprintf(ERROR_REDIS_NO_PAYLOAD, $pf_name)) if (Helpers::Misc::isEmpty($elem));
+
+  my ($ret, $dptr) = queue_remove_element($redis, $q_name, $elem);
+  return ($ret, $dptr);
+}
+
 
 sub queue_safe_load_element_blocking
 {
@@ -231,6 +276,41 @@ sub get_set_members
    return (1, \@v);
 }
 
+sub smembers
+{
+  my $redis    = shift @_;
+  my $set_name = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS,    $pf_name)) if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,      $pf_name)) if (Helpers::Misc::isEmpty($set_name));
+
+  my ($ret, $v) = get_set_members($redis, $set_name);
+  return ($ret, $v);
+}
+
+sub srem {
+  my $redis    = shift @_;
+  my $set_name = shift @_;
+  my $v        = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS,    $pf_name)) if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,      $pf_name)) if (Helpers::Misc::isEmpty($set_name));
+  return (0, sprintf(ERROR_REDIS_NO_2NDKEY,   $pf_name)) if (Helpers::Misc::isEmpty($v));
+
+  my $r = undef;
+
+  eval  {
+          $r = $redis->srem($set_name, $v);
+        };
+  return (0, $@) if ($@);
+  return (1, $r);
+}
+
+
 sub sadd {
   my $redis    = shift @_;
   my $set_name = shift @_;
@@ -240,6 +320,24 @@ sub sadd {
 
   eval  {
           $r = $redis->sadd($set_name, $v);
+        };
+  return (0, $@) if ($@);
+  return (1, $r);
+}
+
+sub scard {
+  my $redis    = shift @_;
+  my $set_name = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS,    $pf_name)) if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,      $pf_name)) if (Helpers::Misc::isEmpty($set_name));
+
+  my $r = undef;
+
+  eval  {
+          $r = $redis->scard($set_name);
         };
   return (0, $@) if ($@);
   return (1, $r);
@@ -326,9 +424,10 @@ sub hgetall {
   my $redis = shift @_;
   my $key   = shift @_;
 
-  my %v = {};
+  my %v;
   eval { %v = $redis->hgetall($key); };
   return (0, $@) if ($@);
+  return (1, undef) if (! keys %v);
   return (1, \%v);
 }
 
