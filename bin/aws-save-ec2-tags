@@ -5,7 +5,7 @@
 # Saves AWS EC2 tags
 # Requires configured aws tool
 #
-# Version 0.0.2
+# Version 0.0.3
 
 use strict;
 use warnings;
@@ -43,7 +43,7 @@ use constant ERR_MSG_MISSING_AWS_EC2_REGION   => qq(AWS EC2 region name is missi
 use constant ERR_MSG_INVALID_INSTANCE_ID      => qq(Must provide a valid AWS EC2 instance id);
 use constant ERR_MSG_MISSING_TAG              => qq(Need provide a name of the tag to set);
 use constant ERR_MSG_MISSING_OUTPUT           => qq(Need a name of the file to write tag values);
-
+use constant ERR_MSG_MODE_NON_OCTAL           => qq(Permissions mode needs to be a octal four or five digit string starting with '0');
 use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to value %s on AWS EC2 instance %s in region %s);
 
 {
@@ -53,9 +53,10 @@ use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to va
                 'TOOL_DESC'       => qq(Saves tags from AWS EC2 instance to a file),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 2,
+                'TOOL_VER_PATCH'  => 3,
                 'tag'             => undef,
                 'mode'            => 0600,
+                'mode_new'        => undef,
                 'output_file'     => undef,
                 'instance_id'     => undef,
                 'region'          => undef,
@@ -67,6 +68,7 @@ use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to va
   my $ret = GetOptions(   "tag=s"             => \$opt->{'tag'},
                           "region=s"          => \$opt->{'region'},
                           "instance-id=s"     => \$opt->{'instance_id'},
+                          "mode=s"            => \$opt->{'mode_new'},
                           "output-file=s"     => \$opt->{'output_file'},
                           "help"              => \$opt->{'help'}
                       );
@@ -79,6 +81,13 @@ use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to va
   Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_REGION)          if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
   Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_TAG)             if (Helpers::Misc::isEmpty($opt->{'tag'}));
   Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_OUTPUT)          if (Helpers::Misc::isEmpty($opt->{'output_file'}));
+
+  if (defined $opt->{'mode_new'})
+    {
+      my $len = length($opt->{'mode_new'});
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MODE_NON_OCTAL) if (!Helpers::Misc::isStringOctal($opt->{'mode_new'}) || (($len != 4) && ($len != 5)));
+      $opt->{'mode'} = oct($opt->{'mode_new'});
+    }
 
   my $cmd = sprintf("aws ec2 describe-tags --filter 'Name=resource-id,Values=%s' 'Name=key,Values=%s' --region=%s|",
                      $opt->{'instance_id'},
@@ -93,8 +102,6 @@ use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to va
   ($ret, $tag_obj) = Helpers::Misc::fromJSON($$dptr);
   Helpers::Misc::display_and_exit( EXIT_FAILURE, "AWS EC2 API returned a non-JSON for a tag description: %s", $tag_obj) if (!$ret);
   Helpers::Misc::display_and_exit( EXIT_FAILURE, "JSON returned by AWS EC2 API does not contain Tags node") if (!defined $tag_obj->{'Tags'});
-
-  use Data::Dumper;
 
   my $value = undef;
   foreach my $this_tag (@{$tag_obj->{'Tags'}})
@@ -133,6 +140,8 @@ sub display_help_and_exit
   printf("                                 Default: %s\n", $opt->{'tag'});
   printf("      --output-file=<filename>   Write tag value into file <filename>\n");
   printf("                                 Default: %s\n", $opt->{'output_file'});
+  printf("      --mode=<mode>              Set output <filename> permissions to <mode>\n");
+  printf("                                 Default: %s\n", $opt->{'mode'});
   printf("      --help                     This help\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
 
