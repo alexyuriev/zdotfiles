@@ -5,7 +5,7 @@
 # Extract useful information from aws ec2 describe instances
 # Requires configured aws tool
 #
-# Version 0.0.15
+# Version 0.0.16
 
 use strict;
 use warnings;
@@ -56,13 +56,14 @@ our $logger = undef;
                 'TOOL_DESC'       => qq(Lists AWS EC2 instances),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 15,
+                'TOOL_VER_PATCH'  => 16,
                 'regions'         => undef,
                 'instance_id'     => undef,
                 'hostname'        => undef,
                 'with_tags'       => 0,
                 'single_instance' => 0,
                 'stdout_json'     => 0,
+                'with-ami'        => 0,
                 'table'           => 0,
                 'list_all'        => 0,
                 'help'            => 0,
@@ -77,6 +78,7 @@ our $logger = undef;
                           "hostname=s"    => \$opt->{'hostname'},
                           "stdout-json"   => \$opt->{'stdout_json'},
                           "table"         => \$opt->{'table'},
+                          "with-ami"      => \$opt->{'with-ami'},
                           "all"           => \$opt->{'list_all'},
                           "help"          => \$opt->{'help'}
                       );
@@ -145,6 +147,7 @@ our $logger = undef;
                                     'PublicIp'      => $this_instance->{'PublicIpAddress'},
                                     'PrivateIp'     => $this_instance->{'PrivateIpAddress'},
                                     'InstanceId'    => $this_instance->{'InstanceId'},
+                                    "AMI"           => $this_instance->{'ImageId'},
                                     'RunState'      => $this_instance->{'State'}->{'Name'},
                                     'AZ'            => $this_instance->{'Placement'}->{'AvailabilityZone'},
                                     'LaunchedAt'    => $this_instance->{'LaunchTime'},
@@ -232,6 +235,8 @@ sub display_help_and_exit
   printf("                         Default: all instances\n");
   printf("      --with-tags        Include all tags assigned to instances\n");
   printf("                         Default: no\n");
+  printf("      --with-ami         Include AMI id the instance was launched from\n");
+  printf("                         Default: no\n");
   printf("      --all              Include instrances in the 'Terminated' state\n");
   printf("                         Default: no\n");
   printf("      --stdout-json      Output results as a JSON - used for creating pipelines\n");
@@ -265,7 +270,7 @@ sub result_as_table
             }
         }
       $i++;
-      printf("%3d| %.20s | %.10s | %.15s | %.15s | %.15s\n", $i, $t->{'ServerName'}, $t->{'AZ'}, $t->{'PublicIp'}, $t->{'PrivateIp'}, $t->{'RunState'});
+      printf("%3d| %.20s | %.10s | %.15s | %.15s | %.15s | %.22s |\n", $i, $t->{'ServerName'}, $t->{'AZ'}, $t->{'PublicIp'}, $t->{'PrivateIp'}, $t->{'RunState'}, $t->{'AMI'});
     }
 
 }
