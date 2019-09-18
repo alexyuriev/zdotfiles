@@ -270,7 +270,7 @@ sub result_as_table
             }
         }
       $i++;
-      printf("%3d| %.20s | %.10s | %.15s | %.15s | %.15s | %.22s |\n", $i, $t->{'ServerName'}, $t->{'AZ'}, $t->{'PublicIp'}, $t->{'PrivateIp'}, $t->{'RunState'}, $t->{'AMI'});
+      printf("%3d| %.20s | %.10s | %.15s | %.15s | %.15s | %-21s\n", $i, $t->{'ServerName'}, $t->{'AZ'}, $t->{'PublicIp'}, $t->{'PrivateIp'}, $t->{'RunState'}, $t->{'AMI'});
     }
 
 }
