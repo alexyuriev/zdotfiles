@@ -1,4 +1,4 @@
-#!/bin/bash 
+#!/bin/bash
 
 DSTDIR=$HOME/zdotfiles
 
@@ -29,27 +29,27 @@ DSTHELPERLIBDIR=${DSTDIR}/${SRCHELPERLIBDIR}
 SRCBINDIR=bin
 
 HELPERLIBS="AWS.pm Misc.pm Logger.pm RedisClient.pm"
-AWSTOOLS="aws-build-ec2-instance 	
-	  aws-srv-ip 			
-	  aws-list-ec2-instances 	
-	  aws-wait-ec2-instance-state 	  
-	  aws-destroy-ec2-instance	
-	  aws-create-iam-user 		
-	  aws-list-iam-policies 		  
-	  aws-create-ec2-sec-group 	
-	  aws-list-ec2-sec-groups 	
-	  aws-edit-ec2-sec-group 	
-	  aws-save-ec2-tags 		
-	  aws-set-ec2-tags 		
+AWSTOOLS="aws-build-ec2-instance
+	  aws-srv-ip
+	  aws-list-ec2-instances
+	  aws-wait-ec2-instance-state
+	  aws-destroy-ec2-instance
+	  aws-create-iam-user
+	  aws-list-iam-policies
+	  aws-create-ec2-sec-group
+	  aws-list-ec2-sec-groups
+	  aws-edit-ec2-sec-group
+	  aws-save-ec2-tags
+	  aws-set-ec2-tags
 	  "
-	  
+
 CMD="echo ${AWSTOOLS} | tr -d '\n'"
 AWSTOOLS=$(eval $CMD)
 echo "AWSTOOLS = $AWSTOOLS"
 
-	  
-MISCBINS="batcheck randompass take-screenshot show-my-external-ipv4 gitup url-2-file extra-non-matching-lines sre-push-to-redis-queue"
-ROOTDOTFILES=".curlrc .bash_profile .nvidia-settings-rc .compton.conf .Xresources .xbindkeysrc"
+
+MISCBINS="batcheck randompass gitprompt take-screenshot show-my-external-ipv4 gitup url-2-file extra-non-matching-lines sre-push-to-redis-queue"
+ROOTDOTFILES=".curlrc .bash_profile .bash_color .nvidia-settings-rc .compton.conf .Xresources .xbindkeysrc"
 PROFILEDFILES="opt.sh"
 CONFIGOPENBOX="rc.xml"
 XORGCONFDFILES="99-no-touchscreen.conf"
@@ -75,28 +75,28 @@ done
 
 echo "Installing dot files into root of the homedir - ${DSTDOTROOT}"
 mkdir -p ${DSTDOTROOT}
-for i in ${ROOTDOTFILES} ; do 
+for i in ${ROOTDOTFILES} ; do
 	j=$i
 	install -m 644 $j ${DSTDOTROOT}
 done
 
 echo "Installing /etc/profile.d files into ${DSTETCPROFILED}"
-mkdir -p ${DSTETCPROFILED} 
+mkdir -p ${DSTETCPROFILED}
 for i in ${PROFILEDFILES} ; do
 	j=${SRCETCPROFILED}/$i
-	install -m 644 $j ${DSTETCPROFILED} 
+	install -m 644 $j ${DSTETCPROFILED}
 done
 
 echo "Installing openbox config files into ${DSTDOTCONFIGOPENBOX}"
-mkdir -p ${DSTDOTCONFIGOPENBOX} 
+mkdir -p ${DSTDOTCONFIGOPENBOX}
 for i in ${CONFIGOPENBOX} ; do
 	j=${SRCDOTCONFIGOPENBOX}/$i
-	install -m 644 $j ${DSTDOTCONFIGOPENBOX} 
+	install -m 644 $j ${DSTDOTCONFIGOPENBOX}
 done
 
 echo "Installing xorg.conf.d files into ${DSTXORGCONFD}"
-mkdir -p ${DSTXORGCONFD} 
+mkdir -p ${DSTXORGCONFD}
 for i in ${XORGCONFDFILES} ; do
 	j=${SRCXORGCONFD}/$i
-	install -m 644 $j ${DSTXORGCONFD} 
+	install -m 644 $j ${DSTXORGCONFD}
 done
