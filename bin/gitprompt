@@ -9,12 +9,8 @@ if [ ! -z $k ]; then
 
 
   if [ ! -z $repo ]; then
-    branch=`git rev-parse --abbrev-ref HEAD`
+    branch=`git rev-parse --abbrev-ref HEAD 2> /dev/null`
   fi
 
   echo "git [$repo:\"$branch\"]"
 fi
-
-#echo "k=$k"
-#echo "repo=$repo"
-#echo "branch=$branch"
