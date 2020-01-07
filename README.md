@@ -15,21 +15,25 @@ By default it will be installed into zdotfiles of your home directory.
 
 ### Misc useful tools
 
-Tool name|Description
----------|-----------
-bake-git-repo|Pulls merges some files from multiple repositories over a master repo based on a plan
-batcheck|Displays the current laptop battery status in X
-gitup|syncs up all branches of a repo against remote
-per-type-editor|Dynamically switches the editor depending on the argument of the file to edit
-randompass|generates a random password
-show-my-external-ipv4|Returns an IPv4 address of the system running it as seen by Google DNS
-sre-sign-debian-package|Signs a Debian package because debsig is just awful
-take-screenshot|Takes a screen shot of an area
-tmux-dev-workspace|Sets up a tmux workspace ( 3 windows )
-url-2-file|Stores content of the URL in a file using easily assembleable configuration
-x-workspace-setup-code|Called by the X manager to create a single work environment
-extra-non-matching-lines|Displays the lines in a file that do not have equivalent lines in another file
-sre-push-to-redis-queue| Pushes lines of a file into a Redis queue.
+Tool name                      | Description
+-------------------------------|-----------
+bake-git-repo                  | Pulls merges some files from multiple repositories over a master repo based on a plan
+batcheck                       | Displays the current laptop battery status in X
+gitup                          | syncs up all branches of a repo against remote
+gitprompt                      | Displays git repo name and a current branch. Useful for putting into prompt (PS1) of a shell
+per-type-editor                | Dynamically switches the editor depending on the argument of the file to edit
+randompass                     | generates a random password
+show-my-external-ipv4          | Returns an IPv4 address of the system running it as seen by Google DNS
+sre-sign-debian-package        | Signs a Debian package because debsig is just awful
+take-screenshot                | Takes a screen shot of an area
+tmux-dev-workspace             | Sets up a tmux workspace ( 3 windows )
+url-2-file                     | Stores content of the URL in a file using easily assembleable configuration
+x-workspace-setup-code         | Called by the X manager to create a single work environment
+extra-non-matching-lines       | Displays the lines in a file that do not have equivalent lines in another file
+sre-push-to-redis-queue        | Pushes lines of a file into a Redis queue.
+sre-fail-if-bad-redis-hash-key | Attempts to fetch a specific field of a redis hash and checks returned value. Exits 0 on a match, 1 on error.
+                                 Very useful to ensure that redis is in the right state for async tools manipulating it.
+
 
 ### AWS manipulation utilities
 
