@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = "0.7";
+  our $VERSION = "0.16";
 }
 
 use strict;
@@ -17,6 +17,8 @@ use constant ERROR_REDIS_NO_REDIS   => qq(ERROR: %s - Redis handle must be defin
 use constant ERROR_REDIS_NO_KEY     => qq(ERROR: %s - Redis key must be defined);
 use constant ERROR_REDIS_NO_2NDKEY  => qq(ERROR: %s - 2nd redis key must also be defined);
 use constant ERROR_REDIS_NO_PAYLOAD => qq(ERROR: %s - Redis payload not defined);
+
+use constant _REDIS_CLIENT_MAGIC_MARKER => qq(*** Helpers::RedisClient magic marker ***);
 
 sub validateRedisCredentials
 {
@@ -95,12 +97,13 @@ sub multi {
 sub redis_exec {
   my $redis = shift @_;
 
-  my $v = undef;
+  my @v = ();
   eval  {
-          $v = $redis->send_command("exec");
+          @v = $redis->send_command("exec");
         };
+
   return (0, $@) if ($@);
-  return (1, $v);
+  return (1, \@v);
 }
 
 sub discard {
@@ -131,6 +134,21 @@ sub del {
   return (1, $v);
 }
 
+sub rpoplpush
+{
+  my $redis = shift @_;
+  my $src_q = shift @_;
+  my $dst_q = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS,  $pf_name)) if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,    $pf_name)) if (Helpers::Misc::isEmpty($src_q));
+  return (0, sprintf(ERROR_REDIS_NO_2NDKEY, $pf_name)) if (Helpers::Misc::isEmpty($dst_q));
+
+  my ($ret, $v) = queue_move_element($redis, $src_q, $dst_q);
+  return ($ret, $v);
+}
 
 sub queue_move_element
 {
@@ -174,6 +192,37 @@ sub lpush
   my ($ret, $r) = queue_add_element($redis, $q_name, $elem);
   return ($ret, $r);
 
+}
+
+sub echo
+{
+  my $redis  = shift @_;
+  my $value  = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  my $v = undef;
+  eval {
+          $v = $redis->echo($value);
+       };
+  return (0, sprintf(ERROR_REDIS_ERROR, $pf_name, $@)) if ($@);
+  return (1, $v);
+}
+
+sub type
+{
+  my $redis = shift @_;
+  my $key   = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS, $pf_name)) if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,   $pf_name)) if (Helpers::Misc::isEmpty($key));
+
+  my $v = undef;
+  eval { $v = $redis->echo($value); };
+  return (0, sprintf(ERROR_REDIS_ERROR, $pf_name, $@)) if ($@);
+  return (1, $v);
 }
 
 sub queue_add_element
@@ -249,6 +298,17 @@ sub queue_safe_load_element_blocking
   return (1, $v);
 }
 
+sub llen {
+  my $redis = shift @_;
+  my $q_name = shift @_;
+
+  return (0, qq(Redis must be defined))           if (!defined $redis);
+  return (0, qq(Queue name name must be defined)) if (Helpers::Misc::isEmpty($q_name));
+
+  my ($ret, $v) = queue_length($redis, $q_name);
+  return ($ret, $v);
+}
+
 sub queue_length
 {
   my $redis  = shift @_;
@@ -316,6 +376,12 @@ sub sadd {
   my $set_name = shift @_;
   my $v        = shift @_;
 
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS,    $pf_name))  if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,      $pf_name))  if (Helpers::Misc::isEmpty($set_name));
+  return (0, sprintf(ERROR_REDIS_NO_PAYLOAD,  $pf_name))  if (!defined $v);
+
   my $r = undef;
 
   eval  {
@@ -369,6 +435,19 @@ sub queue_load_by_index {
         };
   return (0, $@) if ($@);
   return (1, $v);
+}
+
+sub hmset {
+  my $redis    = shift @_;
+  my $key      = shift @_;
+  my $attr_ref = shift @_;
+
+  return (0, qq(Redis must be defined))               if (!defined $redis);
+  return (0, qq(Hash key name must be defined))       if (Helpers::Misc::isEmpty($key));
+  return (0, qq(Hash key attribute must be defined))  if (!defined $attr_ref);
+
+  my ($ret, $v) = set_hash_additive($redis, $key, $attr_ref);
+  return ($ret, $v);
 }
 
 sub set_hash_additive {
@@ -431,24 +510,49 @@ sub hgetall {
   return (1, \%v);
 }
 
-sub get {
+sub hgetall_multi {
   my $redis = shift @_;
   my $key   = shift @_;
 
-  my $v = undef; eval { $v = $redis->get($key); };
+  my $v;
+  eval { $v = $redis->hgetall($key); };
   return (0, $@) if ($@);
-  return (1, $v);
+  return (0, undef) if ($v ne qq(QUEUED));
+  return (1, "QUEUED");
 }
 
 sub set {
   my $redis = shift @_;
   my $key   = shift @_;
-  my $v     = shift @_;
+
+  return (0, "unknown redis")          if (!defined $redis);
+  return (0, "bad or missing key")     if (Helpers::Misc::isEmpty($key));
+
+  my @v = ();
+  while (my $val = shift @_)
+    {
+      push @v, $val;
+    }
+  return (0, "value missing") if (scalar @v == 0);
 
   my $r = undef;
-  eval { $r = $redis->set($key, $v); };
+  eval { $r = $redis->send_command("set", $key, @v); };
   return (0, $@) if ($@);
   return (1, $r);
+}
+
+sub get {
+  my $redis = shift @_;
+  my $key   = shift @_;
+
+  return (0, "unknown redis")          if (!defined $redis);
+  return (0, "bad or missing key")     if (Helpers::Misc::isEmpty($key));
+
+  my $r = undef;
+  eval { $r = $redis->get($key); };
+  return (0, $@) if ($@);
+  return (1, $r);
+
 }
 
 sub expire {
@@ -488,6 +592,37 @@ sub hset {
   return (1, $r);
 }
 
+sub hdel {
+  my $redis = shift @_;
+  my $k = shift @_;
+  my $e = shift @_;
+
+  return (0, "unknown redis")          if (!defined $redis);
+  return (0, "bad or missing key")     if (Helpers::Misc::isEmpty($k));
+  return (0, "bad or missing element") if (Helpers::Misc::isEmpty($e));
+
+  my $r = undef;
+  eval { $r = $redis->hdel($k, $e); };
+  return (0, $@) if ($@);
+  return (1, $r);
+}
+
+
+sub hget {
+  my $redis = shift @_;
+  my $k = shift @_;
+  my $e = shift @_;
+
+  return (0, "unknown redis")          if (!defined $redis);
+  return (0, "bad or missing key")     if (Helpers::Misc::isEmpty($k));
+  return (0, "bad or missing element") if (Helpers::Misc::isEmpty($e));
+
+  my $v = undef;
+  eval { $v = $redis->hget($k, $e); };
+  return (0, $@) if ($@);
+  return (1, $v);
+}
+
 sub redis_keys {
   my $redis = shift @_;
   my $key   = shift @_;
@@ -523,22 +658,29 @@ sub multi_exec
 
   my $t = {
             "multi"   => \&multi,
+            "del"     => \&del,
             "set"     => \&set,
+            "get"     => \&get,
             "hset"    => \&hset,
+            "hmset"   => \&hmset,
+            "hgetall" => \&hgetall_multi,
+            "lrem"    => \&lrem,
+            "llen"    => \&llen,
+            "lpush"   => \&lpush,
             "expire"  => \&expire,
             "exec"    => \&redis_exec,
           };
 
+  my $v = undef;
   foreach my $this_command (@cmd_list)
     {
-      my $r = undef;
-      my $v = undef;
       my $ret = undef;
 
       my ($redis_cmd) = keys %{$this_command};
+
       if (!defined $t->{$redis_cmd})
         {
-          ($ret, $r) = Helpers::RedisClient::discard($redis);
+          ($ret, $v) = Helpers::RedisClient::discard($redis);
           return (0, sprintf("unknown redis command '%s'", $redis_cmd));
         }
       if (scalar @{$this_command->{$redis_cmd}})
@@ -552,13 +694,252 @@ sub multi_exec
 
       if (!$ret)
         {
-          ($ret, $r) = Helpers::RedisClient::discard($redis);
+          ($ret, $v) = Helpers::RedisClient::discard($redis);
           return (0, $v);
         }
     }
-  return (1, "ok");
+
+  return (1, $v);
 }
 
+sub new_multi_exec
+{
+  my $redis = shift @_;
+  my $cmd_ptr = shift @_;
+
+  my @cmd_list_orig = @{$cmd_ptr};
+
+  # Because Redis returns array of arrays on multi/exec which is the results of the
+  # execution of all the commands in the order they were issued and because perl Redis::Client
+  # flattens them we have to inject a marker that would separate results of the commands by
+  # making the server insert a separator string between them.
+  #
+  # Since the string is always inserted it will always be the last element of the last command which
+  # makes parsing reply easier.
+
+  my @cmd_list = ( { 'multi' => [] } );
+  foreach my $cmd (@{$cmd_ptr})
+    {
+      push @cmd_list, $cmd;
+      push @cmd_list, { 'echo' => [ _REDIS_CLIENT_MAGIC_MARKER ]};
+    }
+  push @cmd_list, { 'exec' => [] };
+
+  # table contains:
+  #    "name" of redis command => { call => \&implementation, type => type of the result }
+
+  my $t = {
+            "multi"   =>  {
+                            call => \&multi,
+                            type => "string",
+                          },
+            "type"     => {
+                            call => \&type,
+                            type => "string",
+                          },
+            "del"     =>  {
+                            call => \&del,
+                            type => "string",
+                          },
+            "set"     =>  {
+                            call => \&set,
+                            type => "string",
+                          },
+            "get"     =>  {
+                            call => \&get,
+                            type => "string",
+                          },
+            "hset"    =>  {
+                            call => \&hset,
+                            type => "string",
+                          },
+            "hdel"    =>  {
+                            call => \&hdel,
+                            type => "string",
+                          },
+            "hmset"   => {
+                            call => \&hmset,
+                            type => "string",
+                          },
+            "hgetall" => {
+                            call => \&hgetall_multi,
+                            type => "hash",
+                          },
+            "lrem"    => {
+                            call => \&lrem,
+                            type => "string",
+                          },
+            "llen"    => {
+                            call => \&llen,
+                            type => "string",
+                          },
+            "lpush"   => {
+                            call => \&lpush,
+                            type => "string",
+                          },
+            "expire"  =>  {
+                            call => \&expire,
+                            type => "string",
+                          },
+            "echo"    =>  {
+                            call => \&echo,
+                            type => "string",
+                          },
+            "sadd"    =>  {
+                            call => \&sadd,
+                            type => "string",
+                          },
+            "srem"    =>  {
+                            call => \&srem,
+                            type => "string",
+                          },
+            "exec"    => {
+                            call => \&redis_exec,
+                            type => "string",
+                          }
+          };
+
+  my $v = undef;
+  foreach my $this_command (@cmd_list)
+    {
+      my $ret = undef;
+
+      my ($redis_cmd) = keys %{$this_command};
+
+      if (!defined $t->{$redis_cmd})
+        {
+          ($ret, $v) = Helpers::RedisClient::discard($redis);
+          return (0, sprintf("unknown redis command '%s'", $redis_cmd));
+        }
+      if (scalar @{$this_command->{$redis_cmd}})
+        {
+            ($ret, $v) = $t->{$redis_cmd}->{'call'}->($redis, @{$this_command->{$redis_cmd}});
+        }
+      else
+        {
+            ($ret, $v) = $t->{$redis_cmd}->{'call'}->($redis);
+        }
+
+      if (!$ret)
+        {
+          ($ret, $v) = Helpers::RedisClient::discard($redis);
+          return (0, $v);
+        }
+    }
+
+  my $len = scalar @$v;
+
+  my @final = ();
+  my $cmd_index = 0;
+  my $index_start = 0; my $array_length = 0;
+  for (my $i = 0; $i < $len; $i++)
+    {
+      if (defined @$v[$i] && @$v[$i] eq _REDIS_CLIENT_MAGIC_MARKER )
+        {
+          my $entry = $cmd_list_orig[$cmd_index];
+          my ($cmd) = keys %$entry;
+
+          my $cmd_type = $t->{$cmd}->{'type'};
+          $cmd_type = "default" if ($cmd_type ne qq(string) && $cmd_type ne qq(hash));
+
+          my $opt = {  'cmd'          => $cmd,
+                       'index-start'  => $index_start,
+                       'array-length' => $array_length,
+                     };
+
+          my $dt =  {
+                      "string"    => \&stringFromSubArray,
+                      "hash"      => \&hashFromSubArray,
+                      "default"   => \&defaultArrayFromSubArray,
+                    };
+
+          push @final, $dt->{$cmd_type}($v, $opt);
+
+          $index_start = $i + 1;
+          $array_length = 0;
+          $cmd_index++;
+          next;
+        }
+      $array_length++;
+    }
+
+  return (1, \@final);
+}
+
+sub subArray
+{
+  my $array_ptr = shift @_;
+  my $opt = shift @_;
+
+  my @src = @$array_ptr;
+
+  my @new_array = @src[$opt->{'index-start'} .. ($opt->{'index-start'} + $opt->{'array-length'}) - 1 ]; # range operates on indexes, so we need to decrease a length by 1.
+  return \@new_array;
+
+}
+
+sub defaultArrayFromSubArray
+{
+  my $array_ptr = shift @_;
+  my $opt = shift @_;
+
+  my @src = @$array_ptr;
+
+  print STDERR sprintf("\nHelpers::RedisClient::new_multi_exec() for type %s needs to be implemented. For now, returning array.\n",
+                        $opt->{'cmd'},
+                        $opt->{'array-length'});
+
+  return subArray($array_ptr, $opt);
+}
+
+
+sub stringFromSubArray
+{
+  my $array_ptr = shift @_;
+  my $opt = shift @_;
+
+  my @src = @$array_ptr;
+
+  if ($opt->{'array-length'} != 1 )
+    {
+      print STDERR sprintf( "\nHelpers::RedisClient::new_multi_exec() for %s is supposed to return a string but it has length %s. Returning array\n",
+                            $opt->{'cmd'},
+                            $opt->{'array-length'});
+
+      return subArray($array_ptr, $opt);
+    }
+
+  my $str = $src[$opt->{'index-start'}];
+  return $str;
+}
+
+sub hashFromSubArray
+{
+  my $array_ptr = shift @_;
+  my $opt = shift @_;
+
+  my @src = @$array_ptr;
+  my $hash_ptr = undef;
+
+  if (Helpers::Misc::is_odd($opt->{'array-length'}))
+    {
+      print STDERR sprintf( "\nHelpers::RedisClient::new_multi_exec() for %s is supposed to return hash but has an odd number of elements %s. Returning array\n",
+                            $opt->{'cmd'},
+                            $opt->{'array-length'});
+
+      return subArray($array_ptr, $opt);
+    }
+
+  for (my $i = 0; $i < $opt->{'array-length'} ; $i = $i + 2)
+    {
+      my $key_index = $opt->{'index-start'} + $i;
+      my $v_index = $key_index + 1;
+
+      $hash_ptr->{$src[$key_index]} = $src[$v_index];
+    }
+  return undef if scalar keys %$hash_ptr == 0;
+  return $hash_ptr;
+}
 
 1;
 

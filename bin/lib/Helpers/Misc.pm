@@ -2,17 +2,17 @@ package Helpers::Misc;
 
 # Misc helper functions
 # All of the functions should only use thread safe modules
-#
 
 use strict;
 use warnings;
 
 use FileHandle;
 use Cwd;
+use DateTime;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.20";
+  our $VERSION = "0.27";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -221,13 +221,6 @@ sub strip_comments
   return $before;
 }
 
-sub removeSpaces
-{
-  my $txt = shift @_;
-  print STDERR "Helpers::Misc::removeSpaces() called. Convert to Helpers::Misc::collapse_spaces()\n";
-  return collapse_spaces($txt);
-}
-
 sub display_and_exit
 {
   my $code = shift @_;
@@ -295,6 +288,25 @@ sub deleteValueFromArray {
   return \@new_array;
 }
 
+sub removeValueFromArray {
+  my $array_ptr = shift @_;
+  my $value = shift @_;
+
+  my @new_array = ();
+  my $count = 0;
+  foreach my $this_value (@$array_ptr)
+    {
+      if (!defined $value || $this_value ne $value)
+        {
+          push @new_array, $this_value;
+          next;
+        }
+      $count++;
+    }
+  return ($count, \@new_array);
+}
+
+
 sub isValidPortNumber
 {
   my $port = shift @_;
@@ -319,25 +331,6 @@ sub isValidIpV4
     }
   return 1;
 }
-
-# sub isValidIpV4CIDR
-# {
-#   my $cidr = shift @_;
-
-#   return 0 if (Helpers::Misc::isEmpty($cidr));
-#   my ($oct1, $oct2, $oct3, $oct4_extra, $junk) = split('\.', $cidr, 4);
-#   return 0 if (!Helpers::Misc::isEmpty($junk));
-
-#   my ($oct4, $net) = split('/', $oct4_extra);
-#   foreach my $oct ($oct1, $oct2, $oct3, $oct4)
-#     {
-#       return 0 if (!isUnsignedInteger($oct));
-#       return 0 if ($oct > 255);
-#     }
-#   return 0 if (!isUnsignedInteger($net));
-#   return 0 if ($net > 32);
-#   return 1;
-# }
 
 sub isValidIpV4CIDR
 {
@@ -429,5 +422,58 @@ sub sanitizePath
   return $p;
 }
 
+sub timestamp_in_ms
+{
+  my $dt = DateTime->now();
+  my $etime_ms = int($dt->epoch()) * 1000;
+  return sprintf("%s", $etime_ms);
+}
+
+sub is_odd
+{
+  my $num = shift @_;
+
+  return $num % 2;
+}
+
+sub is_active_pid {
+  my $pid = shift @_;
+
+  my $cnt = kill 'ZERO', $pid;
+  return $cnt == 1;
+}
+
+# FUNCTION $ret = is_active_pid_in_file($pidfile)
+#
+# DESCRIPTION: Checks if the content of a $pidfile is a
+#              currently running process ID.
+#
+#  INPUT: $pidfile - file name to check
+#
+# OUTPUT: 1 - the conent of a file is a currently running
+#             process ID.
+#         0 - the content of a file is not a currently running
+#             process ID or an error happened while checking
+
+sub is_active_pid_in_file {
+  my $fname = shift @_;
+
+  return 0 if (Helpers::Misc::isEmpty($fname));
+  return 0 if (! -e $fname);
+
+  my ($ret, $dptr) = Helpers::Misc::readFile($fname);
+  return 0 if (!$ret);
+  my $pid = $$dptr;
+  return 0 if (!Helpers::Misc::isUnsignedInteger($pid));
+
+  ($ret, $dptr) = Helpers::Misc::readFile(qw(/proc/sys/kernel/pid_max));
+  return 0 if (!$ret);
+  my $max_pid = $$dptr;
+  return 0 if (!Helpers::Misc::isUnsignedInteger($max_pid));
+
+  return 0 if ($pid < 2 || $pid > $max_pid);
+
+  return Helpers::Misc::is_active_pid($pid);
+}
 
 1;
