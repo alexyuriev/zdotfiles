@@ -1,0 +1,209 @@
+#!/usr/bin/perl
+
+# sre-fail-if-bad-redis-hash-key
+#
+# Version 0.0.1
+#
+# Fails if cannot fetch the pre-fefined redis-key
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+
+use Helpers::RedisClient;
+use Helpers::Misc;
+use Helpers::Logger;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file `%s` is missing a node `%s`);
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file `%s` is missing field `%s` in node `%s`);
+
+use constant ERR_MSG_FAILED_TO_CREATE_PID_FILE  => qq(Failed to create PID file %s);
+use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter must be a positive integer);
+
+our $logger = undef;
+our $cleanup_vars = undef;
+
+
+{
+
+  my $opt = {
+              'TOOL_NAME'      => qq(sre-fail-if-bad-redis-hash-key),
+              'TOOL_DESC'      => qq(Exits with failure if a key does not match),
+              'TOOL_VER_MAJOR' => 0,
+              'TOOL_VER_MINOR' => 0,
+              'TOOL_VER_PATCH' => 1,
+
+              '_need-config'        => 1,
+              'config'              => undef,
+              'redis-key'           => undef,
+              'hash-field'          => undef,
+              'expected-value'      => undef,
+
+              'log-tag'             => undef,
+              'pid-file'            => undef,
+              'sleep-at-exit'       => 0,
+              'verbose'             => 0,
+              'help'                => 0
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $ret = GetOptions( "config=s"          => \$opt->{'config'},
+                        "redis-key=s"       => \$opt->{'redis-key'},
+                        "hash-field=s"      => \$opt->{'hash-field'},
+                        "expected-value=s"  => \$opt->{'value-json'},
+
+                        "log-tag=s"         => \$opt->{'log-tag'},
+                        "pid-file=s"        => \$opt->{'pid-file'},
+                        "verbose"           => \$opt->{'verbose'},
+                        "sleep-at-exit=s"   => \$opt->{'sleep-at-exit'},
+
+                        "help"              => \$opt->{'help'}
+                  );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $loggerConfig =  {
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, 'syslog' => { 'facility' => 'user' } },
+                      };
+  $loggerConfig->{'ident'} = $opt->{'log-tag'} if (!Helpers::Misc::isEmpty($opt->{'log-tag'}));
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  # handle pid file
+
+  if (!Helpers::Misc::isEmpty($opt->{'pid-file'}))
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s exists and only one %s can run at a time", $opt->{'pid-file'}, $opt->{'TOOL_NAME'})  if (Helpers::Misc::is_active_pid_in_file($opt->{'pid-file'}));
+      my $v = undef;
+      ($ret, $v) = Helpers::Misc::writeFile($opt->{'pid-file'}, $$ . "\n", { 'mode' => 0600 });
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_FAILED_TO_CREATE_PID_FILE, $opt->{'pid-file'}, $v) if (!$ret);
+      $cleanup_vars->{'remove_pidfile'} = $opt->{'pid-file'};
+    }
+
+  # handle config file processing. $opt->_need-config establishes if the configuraiton file must be present
+
+  my $config          = undef;
+  my $config_json_ptr = undef;
+
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
+      $config_json_ptr = \qq({});
+    }
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+
+  # finished processing of the config file
+
+  foreach my $f (qw/redis/)
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_NODE, $opt->{'config'}, $f) if (Helpers::Misc::isEmpty($config->{$f}));
+    }
+
+  foreach my $f (qw/hostname password db port/)
+    {
+      my $p = 'redis';
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_FIELD, $opt->{'config'}, $f, $p) if (Helpers::Misc::isEmpty($config->{$p}->{$f}));
+    }
+
+  foreach my $f (keys %$opt)
+    {
+      $config->{$f} = $opt->{$f} if (defined $opt->{$f});
+    }
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need a redis hash key to check")                        if (Helpers::Misc::isEmpty($config->{'redis-key'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need a field of a hash key to check")                   if (Helpers::Misc::isEmpty($config->{'hash-field'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need an expected value of a file of hash key to check") if (Helpers::Misc::isEmpty($config->{'expected-value'}));
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_SLEEP_AT_EXIT_POSITIVE) if (!Helpers::Misc::isUnsignedInteger($opt->{'sleep-at-exit'}));
+  $cleanup_vars->{'sleep-at-exit'} = int(rand($opt->{'sleep-at-exit'})) if ($opt->{'randomize-sleep-at-exit'} && int($opt->{'sleep-at-exit'}) != 0);
+
+  my $redis = undef;
+  ($ret, $redis) = Helpers::RedisClient::getRedisConnection($config->{'redis'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, $redis) if (!$ret);
+
+  my $v = undef;
+  ($ret, $v) = Helpers::RedisClient::type($redis, $config->{'redis-key'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to check type of a key `%s` in redis: %s", $config->{'redis-key'}, $v) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Key `%s` returned type `%s` instead of `hash`.",  $config->{'redis-key'}, $v) if ($v ne qq(hash));
+
+  ($ret, $v) = Helpers::RedisClient::hget($redis, $config->{'redis-key'}, $config->{'hash-field'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to fetch value of a field `%s` from key `%s`", $config->{'hash-field'}, $config->{'redis-key'}) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Value of a field `%s` from a key `%s` is not defined", $config->{'hash-field'}, $config->{'redis-key'}) if (!defined $v);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Value of a field `%s` from a key `%s` is `%s` instead of `%s`", $config->{'hash-field'}, $config->{'redis-key'}, $config->{'expected-value'}) if ($v ne $config->{'expected-valuec'});
+
+  exit(EXIT_SUCCESS);
+
+}
+
+exit(EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("  --config=<config.json>           Read redis server configuration from <config.json> file\n");
+  printf("                                   Default: %s\n", $opt->{'redis_config'});
+  printf("  --redis-key=<key>                Check the value of a redis hash with a key <key>\n");
+  printf("                                   Default: %s\n", $opt->{'redis-key'});
+  printf("  --hash-field=<field>             Check the value of a field <field> in the hash\n");
+  printf("                                   Default: %s\n", $opt->{'hash-field'});
+  printf("  --expected-value=<value>         Check to see if the value of a field of a hash matches <value>\n");
+  printf("                                   Default: %s\n", $opt->{'expected-value'});
+
+  printf("  --sleep-at-exit=<sleep-seconds>  Add a delay of <sleep-seconds> before exiting\n");
+  printf("                                   Default: none\n");
+  printf("  --log-tag=<tag>                  Set the logging tag to <tag>\n");
+  printf("                                   Default: %s\n", $opt->{'TOOL_NAME'});
+  printf("  --pid-file=<pidfile.pid>         Store the PID in a file <pidfile.pid>\n");
+  printf("                                   Default: none\n");
+  printf("  --verbose                        Include additional logging\n");
+  printf("                                   Default: No\n");
+  printf("  --help                           This help.\n\n");
+
+  exit(EXIT_FAILURE);
+}
+
+END {
+  sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
+  unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
+}
