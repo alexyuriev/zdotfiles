@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = "0.16";
+  our $VERSION = "0.17";
 }
 
 use strict;
@@ -220,7 +220,7 @@ sub type
   return (0, sprintf(ERROR_REDIS_NO_KEY,   $pf_name)) if (Helpers::Misc::isEmpty($key));
 
   my $v = undef;
-  eval { $v = $redis->echo($value); };
+  eval { $v = $redis->type($key); };
   return (0, sprintf(ERROR_REDIS_ERROR, $pf_name, $@)) if ($@);
   return (1, $v);
 }
