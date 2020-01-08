@@ -2,7 +2,7 @@
 
 # sre-fail-if-bad-redis-hash-key
 #
-# Version 0.0.1
+# Version 0.0.2
 #
 # Fails if cannot fetch the pre-fefined redis-key
 
@@ -61,7 +61,7 @@ our $cleanup_vars = undef;
               'TOOL_DESC'      => qq(Exits with failure if a key does not match),
               'TOOL_VER_MAJOR' => 0,
               'TOOL_VER_MINOR' => 0,
-              'TOOL_VER_PATCH' => 1,
+              'TOOL_VER_PATCH' => 2,
 
               '_need-config'        => 1,
               'config'              => undef,
@@ -82,7 +82,7 @@ our $cleanup_vars = undef;
   my $ret = GetOptions( "config=s"          => \$opt->{'config'},
                         "redis-key=s"       => \$opt->{'redis-key'},
                         "hash-field=s"      => \$opt->{'hash-field'},
-                        "expected-value=s"  => \$opt->{'value-json'},
+                        "expected-value=s"  => \$opt->{'expected-value'},
 
                         "log-tag=s"         => \$opt->{'log-tag'},
                         "pid-file=s"        => \$opt->{'pid-file'},
@@ -165,7 +165,7 @@ our $cleanup_vars = undef;
   ($ret, $v) = Helpers::RedisClient::hget($redis, $config->{'redis-key'}, $config->{'hash-field'});
   Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to fetch value of a field `%s` from key `%s`", $config->{'hash-field'}, $config->{'redis-key'}) if (!$ret);
   Helpers::Misc::display_and_exit(EXIT_FAILURE, "Value of a field `%s` from a key `%s` is not defined", $config->{'hash-field'}, $config->{'redis-key'}) if (!defined $v);
-  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Value of a field `%s` from a key `%s` is `%s` instead of `%s`", $config->{'hash-field'}, $config->{'redis-key'}, $config->{'expected-value'}) if ($v ne $config->{'expected-valuec'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Value of a field `%s` from a key `%s` is `%s` instead of `%s`", $config->{'hash-field'}, $config->{'redis-key'}, $v, $config->{'expected-value'}) if ($v ne $config->{'expected-value'});
 
   exit(EXIT_SUCCESS);
 
@@ -182,7 +182,7 @@ sub display_help_and_exit
   printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
   printf("Options:\n\n");
   printf("  --config=<config.json>           Read redis server configuration from <config.json> file\n");
-  printf("                                   Default: %s\n", $opt->{'redis_config'});
+  printf("                                   Default: %s\n", $opt->{'config'});
   printf("  --redis-key=<key>                Check the value of a redis hash with a key <key>\n");
   printf("                                   Default: %s\n", $opt->{'redis-key'});
   printf("  --hash-field=<field>             Check the value of a field <field> in the hash\n");
