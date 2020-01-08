@@ -2,7 +2,7 @@
 
 # sre-fail-if-bad-redis-hash-key
 #
-# Version 0.0.2
+# Version 0.0.3
 #
 # Fails if cannot fetch the pre-fefined redis-key
 
@@ -53,7 +53,6 @@ use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter mu
 our $logger = undef;
 our $cleanup_vars = undef;
 
-
 {
 
   my $opt = {
@@ -61,7 +60,7 @@ our $cleanup_vars = undef;
               'TOOL_DESC'      => qq(Exits with failure if a key does not match),
               'TOOL_VER_MAJOR' => 0,
               'TOOL_VER_MINOR' => 0,
-              'TOOL_VER_PATCH' => 2,
+              'TOOL_VER_PATCH' => 3,
 
               '_need-config'        => 1,
               'config'              => undef,
@@ -146,6 +145,8 @@ our $cleanup_vars = undef;
       $config->{$f} = $opt->{$f} if (defined $opt->{$f});
     }
 
+  $config->{'redis-url'} = Helpers::RedisClient::obj_to_string($config->{'redis'});
+
   Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need a redis hash key to check")                        if (Helpers::Misc::isEmpty($config->{'redis-key'}));
   Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need a field of a hash key to check")                   if (Helpers::Misc::isEmpty($config->{'hash-field'}));
   Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need an expected value of a file of hash key to check") if (Helpers::Misc::isEmpty($config->{'expected-value'}));
@@ -163,9 +164,9 @@ our $cleanup_vars = undef;
   Helpers::Misc::display_and_exit(EXIT_FAILURE, "Key `%s` returned type `%s` instead of `hash`.",  $config->{'redis-key'}, $v) if ($v ne qq(hash));
 
   ($ret, $v) = Helpers::RedisClient::hget($redis, $config->{'redis-key'}, $config->{'hash-field'});
-  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to fetch value of a field `%s` from key `%s`", $config->{'hash-field'}, $config->{'redis-key'}) if (!$ret);
-  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Value of a field `%s` from a key `%s` is not defined", $config->{'hash-field'}, $config->{'redis-key'}) if (!defined $v);
-  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Value of a field `%s` from a key `%s` is `%s` instead of `%s`", $config->{'hash-field'}, $config->{'redis-key'}, $v, $config->{'expected-value'}) if ($v ne $config->{'expected-value'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to fetch value of a field `%s` from key `%s` from redis %s",         $config->{'hash-field'}, $config->{'redis-key'}, $config->{'redis-url'}) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Value of a field `%s` from a key `%s` in redis %s is not defined",          $config->{'hash-field'}, $config->{'redis-key'}, $config->{'redis-url'}) if (!defined $v);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Value of a field `%s` from a key `%s` in redis %s is `%s` instead of `%s`", $config->{'hash-field'}, $config->{'redis-key'}, $config->{'redis-url'}, $v, $config->{'expected-value'}) if ($v ne $config->{'expected-value'});
 
   exit(EXIT_SUCCESS);
 
