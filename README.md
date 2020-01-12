@@ -1,4 +1,5 @@
 # zdotfiles
+
 Just some useful dotfiles and non-dot files that make life easier
 
 Installation instructions
@@ -6,12 +7,14 @@ Installation instructions
 Edit install.sh and set DSTDIR to wherever you want to install everything into.
 By default it will be installed into zdotfiles of your home directory.
 
-* dconfig       - configuration files for users .config directory
-  * openbox/rc.xml - OpenBox window manager configuration file
-* etc/X11/xorg.conf.d/99-no-touchscreen.conf - disables touch screen in X11
-* etc/profile.d/opt.sh - /opt/bin tree should really be a part of the path
-                       in a modern system
-* .Xresources - Basic X11 customization for Xterm & Xft
+### Misc configuraiton files
+
+File name                                  | Description
+-------------------------------------------|-------------
+.config/openbox/rc.xml                     | OpenBox window manager configuration file
+.config/peco/config.json                   | Configuration file for peco https://github.com/peco/peco interactive filtering tool. You really should bind it to Cltr-R
+etc/X11/xorg.conf.d/99-no-touchscreen.conf | disables touch screen in X11 etc/profile.d/opt.sh |  /opt/bin tree should really be a part of the path in a modern system
+.Xresources                                | Basic X11 customization for Xterm & Xft
 
 ### Misc useful tools
 
