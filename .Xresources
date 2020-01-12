@@ -7,6 +7,10 @@ xterm*rightScrollBar: true
 xterm*scrollbar.width: 20
 xterm*ScrollBar: true
 xterm*scrollTtyOutput: false
+xterm*cursorColor: yellow
+xterm*cursorBlink: true
+xterm*background: black
+xterm*foreground: green
 
 ! use visual bell rather than audio
 
@@ -27,6 +31,6 @@ Xft.antialias: 1
 Xft.rgba: rgb
 
 ! XL-more screen locker configuration
-XL-more.pam_service: lightdm 
+XL-more.pam_service: lightdm
 XL-more.color.ignore: #000000
-XL-more.color.store:  #A9A9A9 
+XL-more.color.store:  #A9A9A9
