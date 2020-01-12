@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# sets up xterms to simplify testing/coding
+#
+# this is alacritty xterm based setup. alacritty is much much much faster
+#
+# alacritty is awesome but it has lousy support for command line switches
+# overriding config parameters so it is necessary to use separate configuration
+# files.
+#
+# .config/alacritty/tmux-dev-workspace.yml is a config file 1x 4K display with
+# 10pt font, black background, green/yellow foregound
+
+CFG_FILE="${HOME}/.config/alacritty/tmux-dev-workspace.yml"
+
+CFG_ADDON=''
+
+if [ -e ${CFG_FILE} ]; then
+	CFG_ADDON="--config-file $CFG_FILE"
+fi
+
+/opt/bin/alacritty ${CFG_ADDON} --command "${HOME}/bin/tmux-dev-workspace"
