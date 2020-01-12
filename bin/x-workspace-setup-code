@@ -1,13 +1,8 @@
 #!/bin/bash
 
-# sets up xterms to simplify testing
-
-#XTERM_1_TITLE="win-1"
-#XTERM_2_TITLE="win-2"
-#XTERM_3_TITLE="win-3"
+# x-workspace-setup-code.xterm
+#
+# sets up xterms to simplify testing/working
 
 xterm -bg black -fg cyan -fs 13 -fullscreen -geometry +0+0 -fullscreen "tmux-dev-workspace"
 
-#xterm -bg black -fg yellow -fs 14 -geometry 166x47+0+0 -title ${XTERM_1_TITLE} -e "tmux new-session\; source-file ~/.tmux/dev-workspace"&
-#xterm -bg black -fg green  -fs 13 -geometry 87x24+1890+0 -title ${XTERM_2_TITLE} &
-#xterm -geometry 100x30+1892+1030 -title ${XTERM_3_TITLE} &
