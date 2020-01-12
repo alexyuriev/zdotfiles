@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# xterm.wrapper
+#
+# xterm wrapper needed to allow for alacritty xterminal to co-exist with xterm
+#
+# make existing xterm xterm.original
+# make this file xterm:
+#
+# cd /usr/bin
+# mv xterm xterm.original
+# mv xterm.wrapper xterm
+
+real_xterm=(which xterm.original)
+
+if  [ -z $real_xterm ] ; then
+
+    echo "Error: this is xterm.wrapper"
+    echo "Error: real xterm should be accessible as xterm.original"
+    exit 1
+fi
+
+if [ ! -z $ALACRITTY_TERM ] ; then
+  unset ALACRITTY_TERM
+fi
+
+exec xterm.original -class xterm $@
