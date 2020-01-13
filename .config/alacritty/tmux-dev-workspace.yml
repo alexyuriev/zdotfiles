@@ -537,7 +537,15 @@ shell:
 # binding with the same triggers is defined. To unset a default binding, it can
 # be mapped to the `ReceiveChar` action. Alternatively, you can use `None` for
 # a no-op if you do not wish to receive input characters for that binding.
-#key_bindings:
+
+key_bindings:
+
+  # Openbox is configured to move between terminals via Control+Alt + Left/Right
+  # we need to swallow those key strokes
+
+  - { key: Left,  mods: Control|Alt, action: None }
+  - { key: Right, mods: Control|Alt, action: None }
+
   # (Windows, Linux, and BSD only)
   #- { key: V,        mods: Control|Shift, action: Paste            }
   #- { key: C,        mods: Control|Shift, action: Copy             }
