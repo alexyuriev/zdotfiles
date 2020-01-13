@@ -12,7 +12,7 @@ use DateTime;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.27";
+  our $VERSION = "0.28";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -192,10 +192,18 @@ sub toJSON
       return (0, qq(Received an undef)) if (!$undefok);
       return (1, qq({}));
     }
-  my $is_pretty = 0; if (defined $opt) { $is_pretty = 1 if (defined $opt->{'pretty'} && $opt->{'pretty'} eq "1"); }
+  my $is_pretty     = 0;
+  my $is_canonical  = 0;
+  if (defined $opt)
+    {
+      $is_pretty    = $opt->{'pretty'}    if (defined $opt->{'pretty'}    && $opt->{'pretty'} eq "1"    );
+      $is_canonical = $opt->{'canonical'} if (defined $opt->{'canonical'} && $opt->{'canonical'} eq "1" );
+    }
 
   my $json = JSON->new->utf8->allow_nonref;
-  return (1, $json->pretty(1)->encode($ptr)) if ($is_pretty);
+  $json = $json->canonical(1) if ($is_canonical);
+  $json = $json->pretty(1)    if ($is_pretty);
+
   return (1, $json->encode($ptr));
 }
 
