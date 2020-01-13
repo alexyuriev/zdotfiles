@@ -1,6 +1,8 @@
 # .bash_profile
 #
 # File executed by bash(1) shell upon login
+#
+# tabs: 4. Convert tabs to spaces
 
 if [ -e $HOME/.bash_aliases ]; then
     . $HOME/.bash_aliases
@@ -40,7 +42,6 @@ ALACRITTY_COLOR_FG_YELLOW="\e[38;5;15m"
 ALACRITTY_COLOR_BG_BLUE="\e[48;5;020m"
 ALACRITTY_COLOR_BG_MUTEGREY="\e[48;5;245m"
 
-
 if [ ! -z $ALACRITTY_TERM ]; then
 
     DEF_PROMPT_DATE_BG=${ALACRITTY_COLOR_BG_BLUE}
@@ -74,9 +75,9 @@ else
 fi
 
 if [ -e $HOME/bin/gitprompt ]; then
-    PS1="\n$DEF_PROMPT_DATE_BG$DEF_PROMPT_DATE_FG \$(date) $DEF_PROMPT_UH_BG$DEF_PROMPT_UH_FG \u@\h \n$COLOR_RESET_ALL$DEF_PROMPT_GIT_FG\$(gitprompt) $DEF_PROMPT_DIR_FG\w $r \n\[$DEF_PROMPT_INDICATOR_FG\]\$ \[$DEF_PROMPT_TEXT_FG\]"
+    PS1="\n$DEF_PROMPT_DATE_BG$DEF_PROMPT_DATE_FG \$(date) $DEF_PROMPT_UH_BG$DEF_PROMPT_UH_FG \u@\h $COLOR_RESET_ALL\n$DEF_PROMPT_GIT_FG\$(gitprompt) $DEF_PROMPT_DIR_FG\w $r \[$DEF_PROMPT_INDICATOR_FG\]\$ \[$DEF_PROMPT_TEXT_FG\]"
 else
-    PS1="\n$DEF_PROMPT_DATE_BG$DEF_PROMPT_DATE_FG \$(date) $DEF_PROMPT_UH_BG$DEF_PROMPT_UH_FG \u@\h \n$DEF_PROMPT_DIR_FG\w $r \n\[$DEF_PROMPT_INDICATOR_FG\]\$ \[$DEF_PROMPT_TEXT_FG\]"
+    PS1="\n$DEF_PROMPT_DATE_BG$DEF_PROMPT_DATE_FG \$(date) $DEF_PROMPT_UH_BG$DEF_PROMPT_UH_FG \u@\h $COLOR_RESET_ALL\n$DEF_PROMPT_DIR_FG\w $r \[$DEF_PROMPT_INDICATOR_FG\]\$ \[$DEF_PROMPT_TEXT_FG\]"
 fi
 
 export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/opt/bin:/opt/sbin:$HOME/bin
