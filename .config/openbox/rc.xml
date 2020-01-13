@@ -240,7 +240,14 @@
     <!-- Ctrl-Alt-C : Coding workspace workspace -->
     <keybind key="C-A-c">
       <action name="Execute">
-        <command>x-workspace-setup-code</command>
+        <command>x-workspace-setup-code.alacritty</command>
+      </action>
+    </keybind>
+
+    <!-- Ctrl-Alt-A : Run alacritty -->
+    <keybind key="C-A-a">
+      <action name="Execute">
+        <command>/opt/bin/alacritty</command>
       </action>
     </keybind>
 
