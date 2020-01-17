@@ -42,23 +42,24 @@ sre-fail-if-bad-redis-hash-key | Attempts to fetch a specific field of a redis h
 
 The following tools allow to quickly do commonly needed tasks on AWS EC2 instances.
 
-Tool name|Description
----------|-----------
-aws-build-ec2-instance|Builds AWS EC2 instance from JSON configuration file with command live overrides
-aws-srv-ip|Gets an IP address of a specific AWS EC2 instance
-aws-list-ec2-instances|Lists AWS EC2 instances in a format easily consumable by other tools
-aws-wait-ec2-instance-state|Waits for a specific instance to reach a specific state
-aws-destroy-ec2-instance|Destroys a running AWS EC2 instance after renaming it to a specific string
-aws-create-iam-user|Creates AWS IAM user
-aws-list-iam-policies|Lists AWS IAM policies in a format easily consumable by other tools
-aws-create-ec2-sec-group|Creates an AWS EC2 Security group
-aws-list-ec2-sec-groups|Lists AWS EC2 Security groups in a format easily consumable by other tools
-aws-edit-ec2-sec-group|Manipulates individual rules in the AWS EC2 security group
-aws-save-ec2-tags|Stores value of AWS EC2 instance tags in a file
-aws-set-ec2-tags|Sets a specific tag on an AWS EC instance
+Tool name                   | Description
+----------------------------|-----------------------------------------------------------------------
+aws-build-ec2-instance      | Builds AWS EC2 instance from JSON configuration file with command live overrides
+aws-srv-ip                  | Gets an IP address of a specific AWS EC2 instance
+aws-list-ec2-instances      | Lists AWS EC2 instances in a format easily consumable by other tools
+aws-wait-ec2-instance-state | Waits for a specific instance to reach a specific state
+aws-destroy-ec2-instance    | Destroys a running AWS EC2 instance after renaming it to a specific string
+aws-create-iam-user         | Creates AWS IAM user
+aws-list-iam-policies       | Lists AWS IAM policies in a format easily consumable by other tools
+aws-create-ec2-sec-group    | Creates an AWS EC2 Security group
+aws-list-ec2-sec-groups     | Lists AWS EC2 Security groups in a format easily consumable by other tools
+aws-edit-ec2-sec-group      | Manipulates individual rules in the AWS EC2 security group
+aws-save-ec2-tags           | Stores value of AWS EC2 instance tags in a file
+aws-set-ec2-tags            | Sets a specific tag on an AWS EC instance
 
 
 ### Note:
 ---------
 
-Some of the tools in this repo rely on a private ``perl-helper-libs`` repo. The to build a release ``config-bake-git-repo.zdotfiles.json`` is provided.
+Some of the tools in this repo rely on a private ``perl-helper-libs`` repo. The needed dependencies have already been merged into this tree.
+``config-bake-git-repo.zdotfiles.json`` is a configuration tool for ``bake-git-repo`` tool used to merge the dependencies. You should not need to use it.
