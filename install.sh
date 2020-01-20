@@ -1,11 +1,35 @@
 #!/bin/bash
 
-DSTDIR=$HOME/zdotfiles
+help_and_exit() {
+	echo ""
+	echo "This is zdotfiles (http://github.com/alexyuriev/zdotfiles"
+	echo ""
+	echo "The installer requires a single argument - destination directory"
+	echo ""
+	echo "Example: "
+	echo ""
+	echo "./install.sh /home/alex/alex/zdotfiles-home"
+	echo ""
+	echo "This will install files into /home/alex/alex/zdotfiles-home"
+	echo ""
+	echo ""
+	echo "Destination directory should not be ${HOME}"
 
+	exit 1
 
+}
+
+if [[ $# -ne 1 ]]; then
+	help_and_exit
+fi
+
+if [[ "$1" == "${HOME}" ]]; then
+	help_and_exit
+fi
+
+DSTDIR=$1
 
 DSTDIRBIN=${DSTDIR}/bin
-DSTDOTROOT=${DSTDIR}/dot-in-home-root
 
 DIRDOTCONFIG=.config
 SRCDOTCONFIG=${DIRDOTCONFIG}
@@ -15,9 +39,10 @@ DIRPROFILED=etc/profile.d
 SRCETCPROFILED=${DIRPROFILED}
 DSTETCPROFILED=${DSTDIR}/${DIRPROFILED}
 
+
 DIRDOTCONFIGOPENBOX=.config/openbox
 SRCDOTCONFIGOPENBOX=${DIRDOTCONFIGOPENBOX}
-DSTDOTCONFIGOPENBOX=${DSTDOTCONFIG}/${DIRDOTCONFIGOPENBOX}
+DSTDOTCONFIGOPENBOX=${DSTDIR}/${DIRDOTCONFIGOPENBOX}
 
 DIRXORGCONFD=etc/X11/xorg.conf.d
 SRCXORGCONFD=${DIRXORGCONFD}
@@ -45,16 +70,52 @@ AWSTOOLS="aws-build-ec2-instance
 
 CMD="echo ${AWSTOOLS} | tr -d '\n'"
 AWSTOOLS=$(eval $CMD)
-echo "AWSTOOLS = $AWSTOOLS"
 
+MISCBINS="	batcheck
+			randompass
+			gitprompt
+			take-screenshot
+			show-my-external-ipv4
+			gitup
+			url-2-file
+			extra-non-matching-lines
+			sre-push-to-redis-queue
+			sre-sign-debian-package
+			sre-fail-if-bad-redis-hash-key
+			per-type-editor
+			tmux-dev-workspace
+			x-workspace-setup-code.alacritty
+			x-workspace-setup-code.xterm
+			xterm.wrapper"
 
-MISCBINS="batcheck randompass gitprompt take-screenshot show-my-external-ipv4 gitup url-2-file extra-non-matching-lines sre-push-to-redis-queue"
-ROOTDOTFILES=".curlrc .bash_profile .bash_color .nvidia-settings-rc .compton.conf .Xresources .xbindkeysrc"
+CMD="echo ${MISCBINS} | tr -d '\n'"
+MISCBINS=$(eval $CMD)
+
+ROOTDOTFILES="	.curlrc
+				.bash_profile
+				.bash_colors
+				.bash_aliases
+				.nvidia-settings-rc
+				.compton.conf
+				.tmux.conf
+				.Xresources
+				.xbindkeysrc"
+
+CMD="echo ${ROOTDOTFILES} | tr -d '\n'"
+ROOTDOTFILES=$(eval $CMD)
+
 PROFILEDFILES="opt.sh"
 CONFIGOPENBOX="rc.xml"
 XORGCONFDFILES="99-no-touchscreen.conf"
 
-echo "Installing helper perl libraries into ${DSTHELPLIBDIR}"
+echo "Installing dot files into ${DSTDIR}"
+mkdir -p ${DSTDIR}
+for i in ${ROOTDOTFILES} ; do
+	j=$i
+	install -m 644 $j ${DSTDIR}
+done
+
+echo "Installing helper perl libraries into ${DSTHELPERLIBDIR}"
 mkdir -p ${DSTDIRBIN}/lib/Helpers
 for i in ${HELPERLIBS}; do
 	j=${SRCHELPERLIBDIR}/$i
@@ -67,17 +128,10 @@ for i in ${AWSTOOLS}; do
 	install -m 755 $j ${DSTDIRBIN}
 done
 
-echo "Install misc bin helpers into ${DSTDIRBIN}"
+echo "Installing misc bin helpers into ${DSTDIRBIN}"
 for i in ${MISCBINS} ; do
 	j=${SRCBINDIR}/$i
 	install -m 755 $j ${DSTDIRBIN}
-done
-
-echo "Installing dot files into root of the homedir - ${DSTDOTROOT}"
-mkdir -p ${DSTDOTROOT}
-for i in ${ROOTDOTFILES} ; do
-	j=$i
-	install -m 644 $j ${DSTDOTROOT}
 done
 
 echo "Installing /etc/profile.d files into ${DSTETCPROFILED}"
