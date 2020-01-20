@@ -201,10 +201,11 @@
     <!-- Keybindings for quick stuff -->
 
     <!-- Ctrl-Alt-L : lock screen -->
+    <!-- Use xl-more locker https://github.com/alexyuriev/xl-more -->
 
     <keybind key="C-A-l">
       <action name="Execute">
-        <command>xl</command>
+        <command>xl-more</command>
       </action>
     </keybind>
 
