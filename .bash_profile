@@ -17,7 +17,7 @@ if [ -e $HOME/.bash_colors ]; then
 fi
 
 function peco_history() {
-    BUFFER=$(history | tail -1000 | tac | sed 's/^[[:space:]]\+[[:digit:]]\+[[:space:]]\+//'| uniq | peco --promot "COMMAND LINE >> ")
+    BUFFER=$(history | tail -1000 | tac | sed 's/^[[:space:]]\+[[:digit:]]\+[[:space:]]\+//'| awk '!seen[$0]++' | peco --promot "COMMAND LINE >> ")
     READLINE_LINE=${BUFFER}
     READLINE_POINT=${#READLINE_LINE}
 }
