@@ -25,6 +25,7 @@ batcheck                       | Displays the current laptop battery status in X
 gitup                          | syncs up all branches of a repo against remote
 gitprompt                      | Displays git repo name and a current branch. Useful for putting into prompt (PS1) of a shell
 per-type-editor                | Dynamically switches the editor depending on the argument of the file to edit
+evince-mc                      | Evince wrapper that places Evince window into a specific location
 randompass                     | generates a random password
 show-my-external-ipv4          | Returns an IPv4 address of the system running it as seen by Google DNS
 sre-sign-debian-package        | Signs a Debian package because debsig is just awful

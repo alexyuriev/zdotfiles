@@ -83,6 +83,7 @@ MISCBINS="	batcheck
 			sre-sign-debian-package
 			sre-fail-if-bad-redis-hash-key
 			per-type-editor
+			evince-mc
 			tmux-dev-workspace
 			x-workspace-setup-code.alacritty
 			x-workspace-setup-code.xterm
