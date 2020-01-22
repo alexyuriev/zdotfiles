@@ -3,7 +3,11 @@
   "editor_rules": [
     {
       "match"  : "\\.pp$",
-      "editor" : "sublime_text"
+      "editor" : "sublime_text -a"
+    },
+    {
+      "match"  : "\\.pdf$",
+      "editor" : "evince-mc"
     }
   ]
 }

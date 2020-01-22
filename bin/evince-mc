@@ -1,0 +1,40 @@
+#!/bin/bash
+
+#
+# wrapper for evince used by per-type-editor in MC
+#
+
+evince_present=(which evince)
+wmctrl_present=(which wmctrl)
+
+if [[ -z $evince_present ]] ; then
+	echo
+	echo "evince-mc needs evince PDF viewer installed."
+	echo "install it before using."
+	echo
+	exit 1
+fi
+
+
+if [[ -z $wmctrl_present ]] ; then
+	echo
+	echo "evince-mc needs wmctrl window control installed."
+	echo "install it before using."
+	echo
+	exit 1
+fi
+
+
+evince $1 &
+
+PID=$! # PID of the process we just launched
+
+while [ "$WID" == "" ]; do
+        WID=$(wmctrl -lp | grep $PID | cut "-d " -f1)
+done
+
+# place the top left corner of the window to x=50, y=50 and give it 2000x2000 size
+# this should be good for most PDFs
+
+wmctrl -i -r $WID -e 0,50,50,2000,2000
+exit 0
