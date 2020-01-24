@@ -15,6 +15,7 @@ File name                                  | Description
 .config/peco/config.json                   | Configuration file for https://github.com/peco/peco interactive filtering tool. You really should bind it to Cltr-R. See .bash_profile
 etc/X11/xorg.conf.d/99-no-touchscreen.conf | disables touch screen in X11 etc/profile.d/opt.sh |  /opt/bin tree should really be a part of the path in a modern system
 .Xresources                                | Basic X11 customization for Xterm & Xft
+.ackrc                                     | Configuration for ack search tool -- ignore cases
 
 ### Misc useful tools
 
@@ -26,6 +27,7 @@ gitup                          | syncs up all branches of a repo against remote
 gitprompt                      | Displays git repo name and a current branch. Useful for putting into prompt (PS1) of a shell
 per-type-editor                | Dynamically switches the editor depending on the argument of the file to edit
 evince-mc                      | Evince wrapper that places Evince window into a specific location
+qiv-mc                         | qiv wrapper that places qiv window into a specific location
 randompass                     | generates a random password
 show-my-external-ipv4          | Returns an IPv4 address of the system running it as seen by Google DNS
 sre-sign-debian-package        | Signs a Debian package because debsig is just awful

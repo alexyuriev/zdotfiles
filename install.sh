@@ -84,6 +84,7 @@ MISCBINS="	batcheck
 			sre-fail-if-bad-redis-hash-key
 			per-type-editor
 			evince-mc
+			qiv-mc
 			tmux-dev-workspace
 			x-workspace-setup-code.alacritty
 			x-workspace-setup-code.xterm
@@ -92,7 +93,8 @@ MISCBINS="	batcheck
 CMD="echo ${MISCBINS} | tr -d '\n'"
 MISCBINS=$(eval $CMD)
 
-ROOTDOTFILES="	.curlrc
+ROOTDOTFILES="	.ackrc
+                .curlrc
 				.bash_profile
 				.bash_colors
 				.bash_aliases
