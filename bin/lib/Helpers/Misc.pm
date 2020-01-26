@@ -12,7 +12,7 @@ use DateTime;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.28";
+  our $VERSION = "0.29";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -321,6 +321,14 @@ sub isValidPortNumber
 
   return 0 if (!Helpers::Misc::isUnsignedInteger($port));
   return 0 if ($port > 65534);
+  return 1;
+}
+
+sub isValidRegex
+{
+  my $regex = shift @_;
+
+  eval { qr/$regex/ }; if ($@) { return 0; }
   return 1;
 }
 
