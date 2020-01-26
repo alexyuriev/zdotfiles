@@ -1,0 +1,8 @@
+{
+	"redis" : {
+		"password": "1LkFUVlTR2CmGmtPoINklnEjOqGY2WvWqXQ2lb",
+  		"hostname": "127.0.0.1",
+	  	"db": 0,
+  		"port": 3333
+	}
+}
