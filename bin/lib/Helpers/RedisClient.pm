@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = "0.17";
+  our $VERSION = "0.20";
 }
 
 use strict;
@@ -17,6 +17,7 @@ use constant ERROR_REDIS_NO_REDIS   => qq(ERROR: %s - Redis handle must be defin
 use constant ERROR_REDIS_NO_KEY     => qq(ERROR: %s - Redis key must be defined);
 use constant ERROR_REDIS_NO_2NDKEY  => qq(ERROR: %s - 2nd redis key must also be defined);
 use constant ERROR_REDIS_NO_PAYLOAD => qq(ERROR: %s - Redis payload not defined);
+use constant ERROR_REDIS_NO_VALUE   => qq(ERRORL %s - Value is not defined);
 
 use constant _REDIS_CLIENT_MAGIC_MARKER => qq(*** Helpers::RedisClient magic marker ***);
 
@@ -126,9 +127,14 @@ sub del {
   return (0, sprintf(ERROR_REDIS_NO_REDIS,  $pf_name)) if (!defined $redis);
   return (0, sprintf(ERROR_REDIS_NO_KEY,    $pf_name)) if (Helpers::Misc::isEmpty($key));
 
+  # del can take multiple keys
+
+  my @args = (); push @args, $key;
+  while ($key = shift @_) { push @args, $key; }
+
   my $v = undef;
   eval  {
-          $v = $redis->send_command("del", $key);
+          $v = $redis->del(@args);
         };
   return (0, $@) if ($@);
   return (1, $v);
@@ -192,6 +198,48 @@ sub lpush
   my ($ret, $r) = queue_add_element($redis, $q_name, $elem);
   return ($ret, $r);
 
+}
+
+sub rpush
+{
+  my $redis  = shift @_;
+  my $key    = shift @_;
+  my $value  = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS,  $pf_name)) if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,    $pf_name)) if (Helpers::Misc::isEmpty($key));
+  return (0, sprintf(ERROR_REDIS_NO_VALUE,  $pf_name)) if (Helpers::Misc::isEmpty($value));
+
+  my $v = undef;
+  eval  {
+          $v = $redis->rpush($key, $value);
+        };
+  return (0, $@) if ($@);
+  return (1, $v);
+}
+
+sub ltrim
+{
+  my $redis  = shift @_;
+  my $key    = shift @_;
+  my $start  = shift @_;
+  my $stop   = shift @_;
+
+  my $pf_name = Helpers::Misc::perl_function();
+
+  return (0, sprintf(ERROR_REDIS_NO_REDIS,  $pf_name)) if (!defined $redis);
+  return (0, sprintf(ERROR_REDIS_NO_KEY,    $pf_name)) if (Helpers::Misc::isEmpty($key));
+  return (0, sprintf("Start position not defined",  $pf_name)) if (Helpers::Misc::isEmpty($start));
+  return (0, sprintf("Stop position not defined",   $pf_name)) if (Helpers::Misc::isEmpty($stop));
+
+  my $v = undef;
+  eval  {
+          $v = $redis->ltrim($key, $start, $stop);
+        };
+  return (0, $@) if ($@);
+  return (1, $v);
 }
 
 sub echo
@@ -308,6 +356,25 @@ sub llen {
   my ($ret, $v) = queue_length($redis, $q_name);
   return ($ret, $v);
 }
+
+sub lrange {
+  my $redis   = shift @_;
+  my $q_name  = shift @_;
+  my $start   = shift @_;
+  my $end     = shift @_;
+
+  return (0, qq(Redis must be defined))           if (!defined $redis);
+  return (0, qq(Queue name name must be defined)) if (Helpers::Misc::isEmpty($q_name));
+
+  my @v = ();
+  eval  {
+          @v = $redis->lrange($q_name, $start, $end);
+        };
+  return (0, $@)    if ($@);
+  return (1, undef) if (scalar @v == 0);
+  return (1, \@v);
+}
+
 
 sub queue_length
 {
@@ -777,6 +844,18 @@ sub new_multi_exec
                             call => \&lpush,
                             type => "string",
                           },
+            "rpush"   => {
+                            call => \&rpush,
+                            type => "string",
+                          },
+            "ltrim"   => {
+                            call => \&rpush,
+                            type => "string",
+                          },
+            "lrange"   => {
+                            call => \&lrange,
+                            type => "array",
+                          },
             "expire"  =>  {
                             call => \&expire,
                             type => "string",
@@ -840,7 +919,9 @@ sub new_multi_exec
           my ($cmd) = keys %$entry;
 
           my $cmd_type = $t->{$cmd}->{'type'};
-          $cmd_type = "default" if ($cmd_type ne qq(string) && $cmd_type ne qq(hash));
+          $cmd_type = "default" if (   $cmd_type ne qq(string)
+                                    && $cmd_type ne qq(hash)
+                                    && $cmd_type ne qq(array));
 
           my $opt = {  'cmd'          => $cmd,
                        'index-start'  => $index_start,
@@ -850,6 +931,7 @@ sub new_multi_exec
           my $dt =  {
                       "string"    => \&stringFromSubArray,
                       "hash"      => \&hashFromSubArray,
+                      "array"     => \&subArray,
                       "default"   => \&defaultArrayFromSubArray,
                     };
 
