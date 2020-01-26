@@ -16,8 +16,29 @@ if [ -e $HOME/.bash_colors ]; then
     . $HOME/.bash_colors
 fi
 
+
+# if peco is installed, use it for Ctrl-R editing
+#
+# if peco-redis-backend is installed, store commands in it so they are shared
+# across all workstation terminals/windows/tmux/screens
+#
+
+unset PROMPT_COMMAND
+
+PECO_HIST_SIZE=1000             # allow peco to access upto a 1000 commands
+PECO_HIST_KEY="peco-backend"    # redis key to store commands for peco
+
+peco_backend=(which peco-redis-backend)
+if [[ -z $peco_backend ]]; then
+   peco_queries_backend="history ${PECO_HIST_SIZE} | tac | sed 's/^[[:space:]]\+[[:digit:]]\+[[:space:]]\+//'| awk '!seen[$0]++'"
+else
+   peco_queries_base="peco-redis-backend --redis-key=${PECO_HIST_KEY} --max-entries=${PECO_HIST_SIZE}"
+   peco_queries_backend="$peco_queries_base --query"
+   PROMPT_COMMAND="(history 1 | $peco_queries_base --store)"
+fi
+
 function peco_history() {
-    BUFFER=$(history | tail -1000 | tac | sed 's/^[[:space:]]\+[[:digit:]]\+[[:space:]]\+//'| awk '!seen[$0]++' | peco --promot "COMMAND LINE >> ")
+    BUFFER=$($peco_queries_backend | peco --prompt "COMMAND LINE >> ")
     READLINE_LINE=${BUFFER}
     READLINE_POINT=${#READLINE_LINE}
 }
@@ -73,6 +94,8 @@ else
     DEF_PROMPT_TEXT_FG=${COLOR_FG_GREEN}
 
 fi
+
+
 
 if [ -e $HOME/bin/gitprompt ]; then
     PS1="\n$DEF_PROMPT_DATE_BG$DEF_PROMPT_DATE_FG \$(date) $DEF_PROMPT_UH_BG$DEF_PROMPT_UH_FG \u@\h $COLOR_RESET_ALL\n$DEF_PROMPT_GIT_FG\$(gitprompt) $DEF_PROMPT_DIR_FG\w \n\[$DEF_PROMPT_INDICATOR_FG\]\$ \[$DEF_PROMPT_TEXT_FG\]"
