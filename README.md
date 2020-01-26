@@ -16,6 +16,7 @@ File name                                  | Description
 etc/X11/xorg.conf.d/99-no-touchscreen.conf | disables touch screen in X11 etc/profile.d/opt.sh |  /opt/bin tree should really be a part of the path in a modern system
 .Xresources                                | Basic X11 customization for Xterm & Xft
 .ackrc                                     | Configuration for ack search tool -- ignore cases
+example-configs/config-wks-redis.json      | Config for accessing a REDIS server for tools that require it
 
 ### Misc useful tools
 
@@ -29,6 +30,7 @@ per-type-editor                | Dynamically switches the editor depending on th
 evince-mc                      | Evince wrapper that places Evince window into a specific location
 qiv-mc                         | qiv wrapper that places qiv window into a specific location
 randompass                     | generates a random password
+peco-redis-backend             | Tool to push all bash interactive commands from a workstation into a REDIS to allow peco to select commands regardless of the sessions those commands were typed in.
 show-my-external-ipv4          | Returns an IPv4 address of the system running it as seen by Google DNS
 sre-sign-debian-package        | Signs a Debian package because debsig is just awful
 take-screenshot                | Takes a screen shot of an area

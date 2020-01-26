@@ -76,6 +76,7 @@ MISCBINS="	batcheck
 			gitprompt
 			take-screenshot
 			show-my-external-ipv4
+			peco-redis-backend
 			gitup
 			url-2-file
 			extra-non-matching-lines
