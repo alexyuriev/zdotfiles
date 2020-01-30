@@ -1,0 +1,251 @@
+#!/usr/bin/perl
+
+# aws-rename-ec2-instanace
+#
+# renames aws EC2 instance
+# Requires configured aws tool
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::Logger;
+use Helpers::AWS;
+use Helpers::Misc;
+
+use constant EXIT_SUCCESS => 0;
+use constant EXIT_FAILURE => 1;
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file %s is missing a node %s);
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file %s is missing field %s in node %s);
+use constant ERR_MSG_FAILED_TO_CREATE_PID_FILE  => qq(Failed to create PID file %s);
+use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter must be a positive integer);
+
+use constant ERR_MSG_INVALID_REGION             => qq(Must provide a valid AWS EC2 region);
+use constant ERR_MSG_MISSING_AWS_EC2_REGION     => qq(AWS EC2 region name is missing);
+use constant ERR_MSG_INVALID_INSTANCE_ID        => qq(Must provide a valid AWS EC2 instance id);
+use constant ERR_MSG_CMD_NO_INSTANCES           => qq(Failed to get a current list of instances);
+use constant ERR_MSG_NO_INSTANCES               => qq(Can't find instance matching hostname %s in AWS EC2 region %s);
+use constant ERR_MSG_AWS_CMD_FAILED             => qq(Failed to execute a command against AWS API);
+use constant ERR_MSG_EC2_AWS_NO_JSON            => qq(AWS API responded with something other than a JSON);
+use constant ERR_MSG_MISSING_NEWNAME            => qq(Must provide a new namew of the instance);
+use constant ERR_MSG_INVALID_HOSTNAME           => qq(New hostname should not contain white spaces);
+
+
+our $logger = undef;
+our $cleanup_vars = undef;
+
+{
+
+  my $opt = {
+              'TOOL_NAME'               => qq(aws-rename-ec2-instance),
+              'TOOL_DESC'               => qq(Rename AWS EC2 instance),
+              'TOOL_VER_MAJOR'          => 0,
+              'TOOL_VER_MINOR'          => 0,
+              'TOOL_VER_PATCH'          => 1,
+
+              'tag'                     => undef,
+              'value'                   => undef,
+              'instance-id'             => undef,
+              'region'                  => undef,
+              'hostname'                => undef,
+              'newname'                 => undef,
+
+              '_need-config'            => 0,
+              'sleep-at-exit'           => 0,
+              'pid-file'                => undef,
+              'log-tag'                 => undef,
+              'verbose'                 => 1,
+              'randomize-sleep-at-exit' => 0,
+              'help'                    => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $ret = GetOptions( "tag=s"                   => \$opt->{'tag'},
+                        "value=s"                 => \$opt->{'value'},
+                        "region=s"                => \$opt->{'region'},
+                        "instance-id=s"           => \$opt->{'instance-id'},
+                        "hostname=s"              => \$opt->{'hostname'},
+                        "newname=s"               => \$opt->{'newname'},
+
+                        "log-tag=s"               => \$opt->{'log-tag'},
+                        "pid-file=s"              => \$opt->{'pid-file'},
+                        "verbose"                 => \$opt->{'verbose'},
+                        "sleep-at-exit=s"         => \$opt->{'sleep-at-exit'},
+                        "randomize-sleep-at-exit" => \$opt->{'randomize-sleep-at-exit'},
+                        "help"                    => \$opt->{'help'}
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $loggerConfig =  {
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, 'syslog' => { 'facility' => 'user' } },
+                      };
+  $loggerConfig->{'ident'} = $opt->{'log-tag'} if (!Helpers::Misc::isEmpty($opt->{'log-tag'}));
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  # handle pid file
+
+  if (!Helpers::Misc::isEmpty($opt->{'pid-file'}))
+    {
+      $logger->log("PID file is %s", $opt->{'pid-file'});
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s exists and only one %s can run at a time", $opt->{'pid-file'}, $opt->{'TOOL_NAME'})  if (Helpers::Misc::is_active_pid_in_file($opt->{'pid-file'}));
+      my $v = undef;
+      ($ret, $v) = Helpers::Misc::writeFile($opt->{'pid-file'}, $$ . "\n", { 'mode' => 0600 });
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_FAILED_TO_CREATE_PID_FILE, $opt->{'pid-file'}, $v) if (!$ret);
+      $cleanup_vars->{'remove_pidfile'} = $opt->{'pid-file'};
+    }
+
+  # handle config file processing. $opt->_need-config establishes if the configuraiton file must be present
+
+  my $config          = undef;
+  my $config_json_ptr = undef;
+
+  if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
+      $config_json_ptr = \qq({});
+    }
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+
+  # finished dealing with a standard config
+
+  foreach my $f (keys %$opt)
+    {
+      $config->{$f} = $opt->{$f} if (defined $opt->{$f});
+    }
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_SLEEP_AT_EXIT_POSITIVE) if (!Helpers::Misc::isUnsignedInteger($opt->{'sleep-at-exit'}));
+  if ($opt->{'sleep-at-exit'} != 0)
+    {
+      my $v = $opt->{'sleep-at-exit'};
+      $v = int(rand($v)) if ($opt->{'randomize-sleep-at-exit'});
+      $cleanup_vars->{'sleep-at-exit'} = $v;
+    }
+
+  # done with the standard config handling
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_AWS_EC2_REGION)  if (Helpers::Misc::isEmpty($config->{'region'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_NEWNAME)         if (Helpers::Misc::isEmpty($config->{'newname'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_REGION)          if (!Helpers::AWS::isValidAWSRegion($config->{'region'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_HOSTNAME)        if (Helpers::Misc::collapse_spaces($config->{'newname'}) ne $config->{'newname'});
+  my $c_opt = 0; foreach my $f (qw/instance-id hostname/) { $c_opt++ if (!Helpers::Misc::isEmpty($config->{$f})); }
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "One and only one --instance-id or --hostname must be present") if ($c_opt != 1);
+
+  if (!Helpers::Misc::isEmpty($config->{'instance-id'}))
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_INSTANCE_ID)     if (!Helpers::AWS::isValidEC2InstanceId($config->{'instance-id'}));
+    }
+
+  if (!Helpers::Misc::isEmpty($config->{'hostname'}))
+    {
+        my $dptr_json = undef;
+        my $cmd = sprintf("aws-list-ec2-instances --region=%s --hostname=%s|", $config->{'region'}, $config->{'hostname'});
+        ($ret, $dptr_json) = Helpers::Misc::readFile($cmd);
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_AWS_CMD_FAILED) if (!$ret);
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_NO_INSTANCES, $config->{'hostname'}, $config->{'region'}) if ($$dptr_json eq '');
+
+        my $dptr = undef;
+        ($ret, $dptr) = Helpers::Misc::fromJSON($$dptr_json);
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_EC2_AWS_NO_JSON) if (!$ret);
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_NO_INSTANCES, $config->{'hostname'}, $config->{'region'}) if (!defined $dptr->{'InstanceId'});
+        $config->{'instance-id'} = $dptr->{'InstanceId'};
+    }
+
+  my $cmd = sprintf("aws-set-ec2-tags --region=%s --instance-id=%s --tag=Name --value=%s",
+                    $config->{'region'},
+                    $config->{'instance-id'},
+                    $config->{'newname'});
+  $ret = system($cmd);
+  $ret = 1 if ($ret != 0);
+
+  my $t = {
+              0 =>  {
+                      'text'       => "Successfully renamed",
+                      'exit-code'  => EXIT_SUCCESS,
+                    },
+              1 =>  {
+                      'text'       => "Failed to rename",
+                      'exit-code'  => EXIT_FAILURE,
+                    }
+          };
+
+  Helpers::Misc::display_and_exit( $t->{$ret}->{'exit-code'}, "%s instance %s in region %s to %s",
+                                                              $t->{$ret}->{'text'},
+                                                              $config->{'instance-id'},
+                                                              $config->{'region'},
+                                                              $config->{'newname'});
+  exit(EXIT_FAILURE);
+}
+
+exit(EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("  --instance-id=<id>              Set tag on AWS instance id <id>\n");
+  printf("                                  Default: %s\n", $opt->{'instance-id'});
+  printf("  --hostname=<name>               Set tag on AWS instance id <name>\n");
+  printf("                                  Default: %s\n", $opt->{'hostname'});
+  printf("  --region=<region>               Set tag on AWS instance in region <region>\n");
+  printf("                                  Default: %s\n", $opt->{'region'});
+  printf("  --newname=<newname>             Set hostname to <newname>\n");
+  printf("                                  Default: %s\n", $opt->{'newname'});
+  printf("  --sleep-at-exit=<sleep-sec>     Sleep for <sleep-sec> before exiting\n");
+  printf("                                  Default: %s\n", $opt->{'sleep-at-exit'});
+  printf("  --randomize-sleep-at-exit       Randomize sleep at exit delay between its value and 0\n");
+  printf("                                  Default: no\n");
+  printf("  --log-tag=<tag>                 Set the logging tag to <tag>\n");
+  printf("                                  Default: %s\n", $opt->{'TOOL_NAME'});
+  printf("  --pid-file=<pidfile.pid>        Store the PID in a file <pidfile.pid>\n");
+  printf("                                  Default: none\n");
+  printf("  --verbose                       Include additional logging\n");
+  printf("                                  Default: No\n");
+  printf("  --help                          This help.\n\n");
+
+  exit(EXIT_FAILURE);
+}
+
+END {
+  sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
+  unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
+}
