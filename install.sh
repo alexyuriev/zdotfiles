@@ -66,6 +66,7 @@ AWSTOOLS="aws-build-ec2-instance
 	  aws-edit-ec2-sec-group
 	  aws-save-ec2-tags
 	  aws-set-ec2-tags
+	  aws-rename-ec2-instance
 	  "
 
 CMD="echo ${AWSTOOLS} | tr -d '\n'"

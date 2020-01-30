@@ -61,7 +61,7 @@ aws-list-ec2-sec-groups     | Lists AWS EC2 Security groups in a format easily c
 aws-edit-ec2-sec-group      | Manipulates individual rules in the AWS EC2 security group
 aws-save-ec2-tags           | Stores value of AWS EC2 instance tags in a file
 aws-set-ec2-tags            | Sets a specific tag on an AWS EC instance
-
+aws-rename-ec2-instance     | Renames AWS EC2 instance
 
 ### Note:
 ---------
