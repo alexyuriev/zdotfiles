@@ -52,6 +52,7 @@ Tool name                   | Description
 aws-build-ec2-instance      | Builds AWS EC2 instance from JSON configuration file with command live overrides
 aws-srv-ip                  | Gets an IP address of a specific AWS EC2 instance
 aws-list-ec2-instances      | Lists AWS EC2 instances in a format easily consumable by other tools
+aws-list-ec2-amis           | Lists AWS EC2 AMIs in a form easily consumable by other tools ( and humans )
 aws-wait-ec2-instance-state | Waits for a specific instance to reach a specific state
 aws-destroy-ec2-instance    | Destroys a running AWS EC2 instance after renaming it to a specific string
 aws-create-iam-user         | Creates AWS IAM user

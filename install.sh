@@ -57,6 +57,7 @@ HELPERLIBS="AWS.pm Misc.pm Logger.pm RedisClient.pm"
 AWSTOOLS="aws-build-ec2-instance
 	  aws-srv-ip
 	  aws-list-ec2-instances
+	  aws-list-ec2-amis
 	  aws-wait-ec2-instance-state
 	  aws-destroy-ec2-instance
 	  aws-create-iam-user
