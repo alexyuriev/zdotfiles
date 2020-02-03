@@ -1,0 +1,245 @@
+#!/usr/bin/perl
+
+# aws-list-ec2-amis
+#
+# Extract useful information from aws ec2 describe-imagfes
+# Requires configured aws tool
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::Logger;
+use Helpers::Misc;
+use Helpers::AWS;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_FAILED_TO_CREATE_PID_FILE  => qq(Failed to create PID file %s);
+use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter must be a positive integer);
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file %s is missing a node '%s');
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file %s is missing field '%s' in node '%s');
+
+our $logger = undef;
+our $cleanup_vars = undef;
+
+{
+  my $opt = {
+                'TOOL_NAME'       => qq(aws-list-ec2-ami),
+                'TOOL_DESC'       => qq(Lists AWS EC2 AMIs),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 1,
+
+                'region'          => undef,
+                'stdout-json'     => 0,
+                'owner'           => undef,
+
+                '_need-config'            => 0,
+                'sleep-at-exit'           => 0,
+                'pid-file'                => undef,
+                'log-tag'                 => undef,
+                'verbose'                 => 1,
+                'randomize-sleep-at-exit' => 0,
+                'help'                    => 0
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $ret = GetOptions(   "region=s"                => \$opt->{'region'},
+                          "stdout-json"             => \$opt->{'stdout-json'},
+                          "owner=s"                 => \$opt->{'owner'},
+
+                          "log-tag=s"               => \$opt->{'log-tag'},
+                          "pid-file=s"              => \$opt->{'pid-file'},
+                          "verbose"                 => \$opt->{'verbose'},
+                          "sleep-at-exit=s"         => \$opt->{'sleep-at-exit'},
+                          "randomize-sleep-at-exit" => \$opt->{'randomize-sleep-at-exit'},
+                          "help"                    => \$opt->{'help'}
+                  );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $loggerConfig =  {
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, 'syslog' => { 'facility' => 'user' } },
+                      };
+  $loggerConfig->{'ident'} = $opt->{'log-tag'} if (!Helpers::Misc::isEmpty($opt->{'log-tag'}));
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  # handle pid file
+
+  if (!Helpers::Misc::isEmpty($opt->{'pid-file'}))
+    {
+      $logger->log("PID file is %s", $opt->{'pid-file'});
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s exists and only one %s can run at a time", $opt->{'pid-file'}, $opt->{'TOOL_NAME'})  if (Helpers::Misc::is_active_pid_in_file($opt->{'pid-file'}));
+      my $v = undef;
+      ($ret, $v) = Helpers::Misc::writeFile($opt->{'pid-file'}, $$ . "\n", { 'mode' => 0600 });
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_FAILED_TO_CREATE_PID_FILE, $opt->{'pid-file'}, $v) if (!$ret);
+      $cleanup_vars->{'remove_pidfile'} = $opt->{'pid-file'};
+    }
+
+  # handle config file processing. $opt->_need-config establishes if the configuraiton file must be present
+
+  my $config          = undef;
+  my $config_json_ptr = undef;
+
+  if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
+      $config_json_ptr = \qq({});
+    }
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_SLEEP_AT_EXIT_POSITIVE) if (!Helpers::Misc::isUnsignedInteger($opt->{'sleep-at-exit'}));
+
+  # finished dealing with a standard config
+
+  foreach my $f (keys %$opt)
+    {
+      $config->{$f} = $opt->{$f} if (defined $opt->{$f});
+    }
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "A known AWS region is needed") if (!Helpers::AWS::isValidAWSRegion($config->{'region'}));
+  $config->{'owner'} = "self" if (Helpers::Misc::isEmpty($config->{'owner'}));
+
+  my $cmd = sprintf("aws ec2 describe-images --region %s --owners %s |", $config->{'region'}, $config->{'owner'});
+
+  my $amis_json_ptr = undef;
+  ($ret, $amis_json_ptr) = Helpers::Misc::readFile($cmd);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to fetch a list of AWS EC2 AMIs for region %s: %s", $config->{'region'}, $amis_json_ptr) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "AWS API returned empty data set fetching a list of AWS EC2 AMIs for region %s", $config->{'region'}) if ($$amis_json_ptr eq '');
+
+  my $amis_obj = undef;
+  ($ret, $amis_obj) = Helpers::Misc::fromJSON($$amis_json_ptr);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "AMIs API returned corrupted data fetching a list of AWS EC2 AMIs for region %s: %s", $config->{'region'}, $amis_obj) if (!$ret);
+
+  my @all_amis = ();
+
+  foreach my $this_ami (@{$amis_obj->{'Images'}})
+    {
+      my $ami = {
+                  name   => "Not named",
+                  access => "PUBLIC",
+                };
+
+      $ami->{'name'}    = $this_ami->{'Name'} if (!Helpers::Misc::isEmpty($this_ami->{'Name'}));
+      $ami->{'ami-id'}  = $this_ami->{'ImageId'};
+      $ami->{'access'}  = "Private" if (!$this_ami->{'Public'});
+      $ami->{'created'} = $this_ami->{'CreationDate'};
+
+      my $bdvs = $this_ami->{'BlockDeviceMappings'};
+
+      foreach my $this_bdv (@{$bdvs})
+        {
+          $ami->{'size'}      = $this_bdv->{'Ebs'}->{'VolumeSize'},
+          $ami->{'snapshot'}  = $this_bdv->{'Ebs'}->{'SnapshotId'},
+
+          # we only care about the 1st
+
+          last;
+        }
+
+      push @all_amis, $ami;
+    }
+
+  my $result = undef;
+  if ($config->{'stdout-json'})
+    {
+      $result = Helpers::Misc::toJSON(\@all_amis, { pretty => 1, cannonical => 1});
+    }
+  else
+    {
+      $result = result_as_table(\@all_amis);
+    }
+  printf("%s\n", $result);
+
+  exit(EXIT_SUCCESS);
+}
+
+exit(EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("  --region=<region>              List instances from AWS EC2 region <region>\n");
+  printf("                                 Default: %s\n", $opt->{'region'});
+  printf("  --owner=<owner>                Show AMIs owned by <owner>\n");
+  printf("                                 Default: %s\n", $opt->{'owner'});
+  printf("  --stdout-json                  Output results as a JSON - used for creating pipelines\n");
+  printf("                                 Default: no\n");
+  printf("  --sleep-at-exit=<sleep-sec>    Sleep for <sleep-sec> before exiting\n");
+  printf("                                 Default: %s\n", $opt->{'sleep-at-exit'});
+  printf("  --randomize-sleep-at-exit      Randomize sleep at exit delay between its value and 0\n");
+  printf("                                 Default: no\n");
+  printf("  --log-tag=<tag>                Set the logging tag to <tag>\n");
+  printf("                                 Default: %s\n", $opt->{'TOOL_NAME'});
+  printf("  --pid-file=<pidfile.pid>       Store the PID in a file <pidfile.pid>\n");
+  printf("                                 Default: none\n");
+  printf("  --verbose                      Include additional logging\n");
+  printf("                                 Default: No\n");
+  printf("  --help                         This help.\n\n");
+
+  exit(EXIT_FAILURE);
+}
+
+END {
+  sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
+  unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
+}
+
+sub result_as_table
+{
+  my $amis_ptr = shift @_;
+
+  my $result = '';
+
+  my $row_format = "%3s| %-21s | %-33s | %-2s | %-16s | %-7s | %-21s\n";
+  $result .= sprintf("\n");
+  $result .= sprintf($row_format, '', "AMI ID", "AMI Name", "Sz", "Date", "Access", "Snapshot");
+  $result .= sprintf("-------------------------------------------------------------------------------------------------------------------------\n");
+
+  my $i = 0;
+  foreach my $ami (@$amis_ptr)
+    {
+      $i++;
+      $result .= sprintf($row_format, $i, $ami->{'ami-id'}, $ami->{'name'}, $ami->{'size'}, substr($ami->{'created'}, 0, 16), $ami->{'access'}, $ami->{'snapshot'});
+    }
+  return $result;
+}
+
