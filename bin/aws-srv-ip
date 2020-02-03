@@ -2,7 +2,7 @@
 
 DEFAULT_REGION=us-west-2
 
-if [ -z $1 ]; then
+if [[ -z "$1" ]]; then
 	echo "aws-srv-ip needs a hostname"
 	exit 1
 fi
@@ -14,7 +14,12 @@ if [ ! -z ${AWS_DEF_REGION} ]; then
 	region=${AWS_DEF_REGION}
 fi
 
-aws-list-ec2-instances --region=$region --hostname=$srv_name | jq '.PublicIp' | tr -d '"'
+instance_ip=$(aws-list-ec2-instances --region=$region --hostname=$srv_name | jq '.PublicIp' | tr -d '"')
+
+if [[ "$instance_ip" == "null" ]]; then
+	instance_ip=''
+fi
+echo ${instance_ip}
 
 
 
