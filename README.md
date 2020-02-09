@@ -41,6 +41,7 @@ x-workspace-setup-code         | Called by the X manager to create a single work
 extra-non-matching-lines       | Displays the lines in a file that do not have equivalent lines in another file
 sre-push-to-redis-queue        | Pushes lines of a file into a Redis queue.
 sre-fail-if-bad-redis-hash-key | Attempts to fetch a specific field of a redis hash and checks returned value. Exits 0 on a match, 1 on error. Very useful to ensure that redis is in the right state for async tools manipulating it.
+take_notes                     | A wrapper for taking notes stored in a single text file, entries timestamped. Uses ``joe`` text editor. Use ``take_notes [<beginning of a note>]``
 
 
 ### AWS manipulation utilities

@@ -1,0 +1,23 @@
+#!/bin/bash
+
+PAST_ALL_LINES="10000000" # skipping this many lines puts us to the bottom of the file
+
+EDITOR=/usr/bin/joe
+LOGBOOK=/home/alex/securedocs/notes.txt
+
+if [[ ! -f ${LOGBOOK} ]]; then
+   echo "${LOGBOOK} is not found. Check if it exists first?"
+   exit 1
+fi
+
+if [[ ! -f ${EDITOR} ]]; then
+   echo "${EDITOR} is not found. Install it first?"
+   exit 1
+fi
+
+STRING=''
+if [[ ! -z "$@" ]]; then
+   STRING="$@ "
+fi
+
+echo -e -n "\n`date`\n===============================\n\n$STRING"|${EDITOR} +100000000 ${LOGBOOK}

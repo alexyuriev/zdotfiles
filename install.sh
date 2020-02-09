@@ -91,7 +91,8 @@ MISCBINS="	batcheck
 			tmux-dev-workspace
 			x-workspace-setup-code.alacritty
 			x-workspace-setup-code.xterm
-			xterm.wrapper"
+			xterm.wrapper
+			take_notes"
 
 CMD="echo ${MISCBINS} | tr -d '\n'"
 MISCBINS=$(eval $CMD)
