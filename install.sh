@@ -85,6 +85,7 @@ MISCBINS="	batcheck
 			sre-push-to-redis-queue
 			sre-sign-debian-package
 			sre-fail-if-bad-redis-hash-key
+			sre-validate-dns-record
 			per-type-editor
 			evince-mc
 			qiv-mc
