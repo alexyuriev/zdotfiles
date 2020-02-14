@@ -4,7 +4,7 @@
 #
 # Validates a DNS record against a server
 #
-# Version 0.0.2
+# Version 0.0.3
 
 use strict;
 use warnings;
@@ -59,7 +59,7 @@ our $cleanup_vars = undef;
               'TOOL_DESC'       => qq(Validate expected value of a DNS record),
               'TOOL_VER_MAJOR'  => 0,
               'TOOL_VER_MINOR'  => 0,
-              'TOOL_VER_PATCH'  => 2,
+              'TOOL_VER_PATCH'  => 3,
 
               'dns-server'      => undef,
               'hostname'        => undef,
@@ -187,7 +187,7 @@ our $cleanup_vars = undef;
             }
           last if ($is_found);
         }
-      sleep($config->{'retry-delay'});
+      sleep($config->{'retry-delay'}) if ($this_try != $config->{'max-tries'});
     }
 
   Helpers::Misc::display_and_exit(EXIT_FAILURE, "Name server %s DID NOT return expected value %s for record type %s for %s",
