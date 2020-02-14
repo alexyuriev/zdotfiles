@@ -4,7 +4,7 @@
 #
 # Validates a DNS record against a server
 #
-# Version 0.0.1
+# Version 0.0.2
 
 use strict;
 use warnings;
@@ -59,7 +59,7 @@ our $cleanup_vars = undef;
               'TOOL_DESC'       => qq(Validate expected value of a DNS record),
               'TOOL_VER_MAJOR'  => 0,
               'TOOL_VER_MINOR'  => 0,
-              'TOOL_VER_PATCH'  => 1,
+              'TOOL_VER_PATCH'  => 2,
 
               'dns-server'      => undef,
               'hostname'        => undef,
@@ -153,6 +153,10 @@ our $cleanup_vars = undef;
 
   my $resolver = Net::DNS::Resolver->new();
   $resolver->nameserver($config->{'dns-server'});
+  $resolver->retry(1);
+  $resolver->retrans(1);
+  $resolver->tcp_timeout(10);
+  $resolver->udp_timeout(10);
 
   my $is_found = 0;
 
@@ -163,8 +167,14 @@ our $cleanup_vars = undef;
                     $config->{'hostname'},
                     $config->{'record-type'},
                     $config->{'expected-value'},
-                    $config->{'dns-server'});
+                    $config->{'dns-server'}) if ($config->{'verbose'});
+
       my $reply = $resolver->search($config->{'hostname'});
+      if ($config->{'verbose'})
+        {
+          my $txt = 'Received'; $txt = 'Did not receive' if (!defined $reply);
+          $logger->log("%s a reply from %s", $txt, $config->{'dns-server'});
+        }
       if ($reply)
         {
           foreach my $rr ($reply->answer)
@@ -175,6 +185,7 @@ our $cleanup_vars = undef;
               $is_found = 1;
               last;
             }
+          last if ($is_found);
         }
       sleep($config->{'retry-delay'});
     }
