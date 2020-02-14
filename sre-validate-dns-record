@@ -1,0 +1,235 @@
+#!/usr/bin/perl
+#
+# sre-validate-dns-record
+#
+# Validates a DNS record against a server
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Net::DNS;
+
+use Helpers::Misc;
+use Helpers::Logger;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file `%s` is missing a node `%s`);
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file `%s` is missing field `%s` in node `%s`);
+use constant ERR_MSG_FAILED_TO_CREATE_PID_FILE  => qq(Failed to create PID file %s);
+use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter must be a positive integer);
+
+our $logger = undef;
+our $cleanup_vars = undef;
+
+{
+
+  my $opt = {
+              'TOOL_NAME'       => qq(sre-validate-dns-record),
+              'TOOL_DESC'       => qq(Validate expected value of a DNS record),
+              'TOOL_VER_MAJOR'  => 0,
+              'TOOL_VER_MINOR'  => 0,
+              'TOOL_VER_PATCH'  => 1,
+
+              'dns-server'      => undef,
+              'hostname'        => undef,
+              'record-type'     => undef,
+              'expected-value'  => undef,
+              'max-tries'       => 3,
+              'retry-delay'     => 5,
+
+              '_need-config'    => 0,
+              'log-tag'         => undef,
+              'pid-file'        => undef,
+              'sleep-at-exit'   => 0,
+              'verbose'         => 0,
+              'help'            => 0
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $ret = GetOptions( "dns-server=s"      => \$opt->{'dns-server'},
+                        "hostname=s"        => \$opt->{'hostname'},
+                        "record-type=s"     => \$opt->{'record-type'},
+                        "expected-value=s"  => \$opt->{'expected-value'},
+                        'max-tries=s'       => \$opt->{'max-tries'},
+                        "retry-delay=s"     => \$opt->{'retry-delay'},
+
+                        "log-tag=s"         => \$opt->{'log-tag'},
+                        "pid-file=s"        => \$opt->{'pid-file'},
+                        "verbose"           => \$opt->{'verbose'},
+                        "sleep-at-exit=s"   => \$opt->{'sleep-at-exit'},
+
+                        "help"              => \$opt->{'help'}
+                  );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $loggerConfig =  {
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, 'syslog' => { 'facility' => 'user' } },
+                      };
+  $loggerConfig->{'ident'} = $opt->{'log-tag'} if (!Helpers::Misc::isEmpty($opt->{'log-tag'}));
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  # handle pid file
+
+  if (!Helpers::Misc::isEmpty($opt->{'pid-file'}))
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s exists and only one %s can run at a time", $opt->{'pid-file'}, $opt->{'TOOL_NAME'})  if (Helpers::Misc::is_active_pid_in_file($opt->{'pid-file'}));
+      my $v = undef;
+      ($ret, $v) = Helpers::Misc::writeFile($opt->{'pid-file'}, $$ . "\n", { 'mode' => 0600 });
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_FAILED_TO_CREATE_PID_FILE, $opt->{'pid-file'}, $v) if (!$ret);
+      $cleanup_vars->{'remove_pidfile'} = $opt->{'pid-file'};
+    }
+
+  # handle config file processing. $opt->_need-config establishes if the configuraiton file must be present
+
+  my $config          = undef;
+  my $config_json_ptr = undef;
+
+  if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
+      $config_json_ptr = \qq({});
+    }
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+
+  # finished processing of the config file
+
+  foreach my $f (keys %$opt)
+    {
+      $config->{$f} = $opt->{$f} if (defined $opt->{$f});
+    }
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need a DNS server to check")                                             if (Helpers::Misc::isEmpty($config->{'dns-server'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need a hostname to check")                                               if (Helpers::Misc::isEmpty($config->{'hostname'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need a record type to check (only A is currently supported)")            if (Helpers::Misc::isEmpty($config->{'record-type'}));
+  $config->{'record-type'} = uc($config->{'record-type'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Record type is not A")                                                   if ($config->{'record-type'} ne 'A');
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need an expected value to check for (only IPv4 is currently supported)") if (!Helpers::Misc::isValidIpV4($config->{'expected-value'}));
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_SLEEP_AT_EXIT_POSITIVE)     if (!Helpers::Misc::isUnsignedInteger($opt->{'sleep-at-exit'}));
+  if ($opt->{'sleep-at-exit'} != 0)
+    {
+      my $v = $opt->{'sleep-at-exit'};
+      $v = int(rand($v)) if ($opt->{'randomize-sleep-at-exit'});
+      $cleanup_vars->{'sleep-at-exit'} = $v;
+    }
+
+  my $resolver = Net::DNS::Resolver->new();
+  $resolver->nameserver($config->{'dns-server'});
+
+  my $is_found = 0;
+
+  for (my $this_try = 1; $this_try <= $config->{'max-tries'}; $this_try++)
+    {
+      $logger->log("Attempt #%s validating '%s' record type '%s' being '%s' against name server '%s'.",
+                    $this_try,
+                    $config->{'hostname'},
+                    $config->{'record-type'},
+                    $config->{'expected-value'},
+                    $config->{'dns-server'});
+      my $reply = $resolver->search($config->{'hostname'});
+      if ($reply)
+        {
+          foreach my $rr ($reply->answer)
+            {
+              next if ($rr->type ne $config->{'record-type'});
+              my $found_value = $rr->address;
+              next if ($found_value ne $config->{'expected-value'});
+              $is_found = 1;
+              last;
+            }
+        }
+      sleep($config->{'retry-delay'});
+    }
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Name server %s DID NOT return expected value %s for record type %s for %s",
+                                                $config->{'dns-server'},
+                                                $config->{'expected-value'},
+                                                $config->{'record-type'},
+                                                $config->{'hostname'} ) if (!$is_found);
+  Helpers::Misc::display_and_exit(EXIT_SUCCESS, "Name server %s returned expected value %s for record type %s for %s",
+                                                $config->{'dns-server'},
+                                                $config->{'expected-value'},
+                                                $config->{'record-type'},
+                                                $config->{'hostname'} );
+
+  exit(EXIT_FAILURE);
+
+}
+
+exit(EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("  --dns-server=<server>               Check name server <server>\n");
+  printf("                                      Default: %s\n", $opt->{'dns-server'});
+  printf("  --hostname=<hostname>               Check hostname <hostname>\n");
+  printf("                                      Default: %s\n", $opt->{'hostname'});
+  printf("  --record-type=<type>                Check a record type <type>\n");
+  printf("                                      Default: %s\n", $opt->{'record-type'});
+  printf("  --expected-value=<expected-value>   Check for expected value matching <expected-value>\n");
+  printf("                                      Default: %s\n", $opt->{'expected-value'});
+  printf("  --max-tries=<max>                   Try <max> times\n");
+  printf("                                      Default: %s\n", $opt->{'max-tries'});
+  printf("  --retry-delay=<seconds>             Sleep for <seconds> before a retry on a failure\n");
+  printf("                                      Default: %s\n", $opt->{'retry-delay'});
+  printf("  --sleep-at-exit=<sleep-seconds>     Add a delay of <sleep-seconds> before exiting\n");
+  printf("                                      Default: %s\n", $opt->{'sleep-at-exit'});
+  printf("  --log-tag=<tag>                     Set the logging tag to <tag>\n");
+  printf("                                      Default: %s\n", $opt->{'TOOL_NAME'});
+  printf("  --pid-file=<pidfile.pid>            Store the PID in a file <pidfile.pid>\n");
+  printf("                                      Default: none\n");
+  printf("  --verbose                           Include additional logging\n");
+  printf("                                      Default: No\n");
+  printf("  --help                              This help.\n\n");
+
+  exit(EXIT_FAILURE);
+}
+
+END {
+  sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
+  unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
+}
