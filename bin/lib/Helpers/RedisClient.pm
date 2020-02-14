@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = "0.20";
+  our $VERSION = "0.22";
 }
 
 use strict;
@@ -608,6 +608,21 @@ sub set {
   return (1, $r);
 }
 
+sub setnx {
+  my $redis = shift @_;
+  my $key   = shift @_;
+  my $v     = shift @_;
+
+  return (0, "unknown redis")          if (!defined $redis);
+  return (0, "bad or missing key")     if (Helpers::Misc::isEmpty($key));
+  return (0, "missing value")          if (Helpers::Misc::isEmpty($v));
+
+  my $r = undef;
+  eval { $r = $redis->setnx($key, $v); };
+  return (0, $@) if ($@);
+  return (1, $r);
+}
+
 sub get {
   my $redis = shift @_;
   my $key   = shift @_;
@@ -658,6 +673,24 @@ sub hset {
   return (0, $@) if ($@);
   return (1, $r);
 }
+
+sub hsetnx {
+  my $redis = shift @_;
+  my $k = shift @_;
+  my $e = shift @_;
+  my $v = shift @_;
+
+  return (0, "unknown redis")          if (!defined $redis);
+  return (0, "bad or missing key")     if (Helpers::Misc::isEmpty($k));
+  return (0, "bad or missing element") if (Helpers::Misc::isEmpty($e));
+  return (0, "bad or missing value")   if (Helpers::Misc::isEmpty($v));
+
+  my $r = undef;
+  eval { $r = $redis->hsetnx($k, $e => $v); };
+  return (0, $@) if ($@);
+  return (1, $r);
+}
+
 
 sub hdel {
   my $redis = shift @_;
@@ -812,12 +845,20 @@ sub new_multi_exec
                             call => \&set,
                             type => "string",
                           },
+            "setnx"   =>  {
+                            call => \&setnx,
+                            type => "string",
+                          },
             "get"     =>  {
                             call => \&get,
                             type => "string",
                           },
             "hset"    =>  {
                             call => \&hset,
+                            type => "string",
+                          },
+            "hsetnx"  =>  {
+                            call => \&hsetnx,
                             type => "string",
                           },
             "hdel"    =>  {

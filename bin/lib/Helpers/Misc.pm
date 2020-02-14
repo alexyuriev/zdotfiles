@@ -12,7 +12,7 @@ use DateTime;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.29";
+  our $VERSION = "0.30";
 }
 
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
@@ -386,9 +386,19 @@ sub isUnsignedInteger
   my $r = 0;
   if (!isEmpty($a))
     {
+      $a =~ s/^\+//g;
+      $a =~ s/^-//g;
+
       $r = 1 if ( $a =~ /^\d+$/g);
     }
   return $r;
+}
+
+sub isPositiveInteger{
+  my $a = shift @_;
+
+  return 0 if (!isUnsignedInteger($a));
+  return ($a > 0);
 }
 
 sub collapse_spaces
