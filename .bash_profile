@@ -4,6 +4,15 @@
 #
 # tabs: 4. Convert tabs to spaces
 
+# since this can be source'd we should only either use return OR exit
+# depending on if it was sourced
+
+if [[ "$0" != "$BASH_SOURCE" ]]; then
+    ret=return
+else
+    ret=exit
+fi
+
 if [ -e $HOME/.bash_aliases ]; then
     . $HOME/.bash_aliases
 fi
@@ -16,6 +25,21 @@ if [ -e $HOME/.bash_colors ]; then
     . $HOME/.bash_colors
 fi
 
+export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/opt/bin:/opt/sbin:$HOME/bin
+
+# The rest should be executed only in the interactive sessions.
+
+if [[ ! -t 1 ]] ; then
+  $ret 0    # non-interactive, exit
+fi
+
+# see if line-editing is enabled, it may be useful
+
+if [[ ${SHELLOPTS} =~ (vi|emacs) ]] ; then
+   LINE_EDITING=1
+else
+   LINE_EDITING=0
+fi
 
 # if peco is installed, use it for Ctrl-R editing
 #
@@ -25,8 +49,8 @@ fi
 
 unset PROMPT_COMMAND
 
-PECO_HIST_SIZE=1000             # allow peco to access upto a 1000 commands
-PECO_HIST_KEY="peco-backend"    # redis key to store commands for peco
+PECO_HIST_SIZE=10000 # allow peco to access upto a 1000 commands
+PECO_HIST_KEY="peco-backend"
 
 peco_backend=(which peco-redis-backend)
 if [[ -z $peco_backend ]]; then
@@ -47,7 +71,9 @@ function peco_history() {
 
 peco_present=(which peco)
 if [ ! -z $peco_present ]; then
-    bind -x '"\C-r":peco_history'
+    if [[ $LINE_EDITING -eq "1" ]]; then
+        bind -x '"\C-r":peco_history'
+    fi
 fi
 
 # for some reason xterm mapping of colors does not match ALACRITTY mappings but since we want identical prompts
@@ -95,12 +121,8 @@ else
 
 fi
 
-
-
 if [ -e $HOME/bin/gitprompt ]; then
     PS1="\n$DEF_PROMPT_DATE_BG$DEF_PROMPT_DATE_FG \$(date) $DEF_PROMPT_UH_BG$DEF_PROMPT_UH_FG \u@\h $COLOR_RESET_ALL\n$DEF_PROMPT_GIT_FG\$(gitprompt) $DEF_PROMPT_DIR_FG\w \n\[$DEF_PROMPT_INDICATOR_FG\]\$ \[$DEF_PROMPT_TEXT_FG\]"
 else
     PS1="\n$DEF_PROMPT_DATE_BG$DEF_PROMPT_DATE_FG \$(date) $DEF_PROMPT_UH_BG$DEF_PROMPT_UH_FG \u@\h $COLOR_RESET_ALL\n$DEF_PROMPT_DIR_FG\w \n\[$DEF_PROMPT_INDICATOR_FG\]\$ \[$DEF_PROMPT_TEXT_FG\]"
 fi
-
-export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/opt/bin:/opt/sbin:$HOME/bin
