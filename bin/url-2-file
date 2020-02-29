@@ -4,7 +4,7 @@
 #
 # Stores content of the URL in a file
 #
-# Version 0.0.2
+# Version 0.0.3
 
 use strict;
 use warnings;
@@ -44,7 +44,7 @@ our $logger = undef;
                 'TOOL_DESC'       => qq(Stores content of the URL in a file),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 2,
+                'TOOL_VER_PATCH'  => 3,
                 'url'             => undef,
                 'target_file'     => undef,
                 'stdout'          => 0,
@@ -100,7 +100,7 @@ our $logger = undef;
   my $data = undef;
   ($ret, $data) = get_url_data($opt->{'url'});
   Helpers::Misc::display_and_exit(-1, qq(Failed to fetch data from url %s: %s), $opt->{'url'}, $data) if (!$ret);
-  Heleprs::Misc::display_and_exit(0, qq(Received 404 from %s. Not writing content to %s), $opt->{'url'}, $target_file_txt) if (!defined $data);
+  Helpers::Misc::display_and_exit(0, qq(Received 404 from %s. Not writing content to %s), $opt->{'url'}, $target_file_txt) if (!defined $data);
 
   my $r = undef;
   ($ret, $r) = Helpers::Misc::writeFile($opt->{'target_file'}, $data, { 'mode' => $opt->{'target_mode'} });
