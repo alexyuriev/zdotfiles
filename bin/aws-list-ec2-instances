@@ -5,7 +5,7 @@
 # Extract useful information from aws ec2 describe instances
 # Requires configured aws tool
 #
-# Version 0.0.16
+# Version 0.0.17
 
 use strict;
 use warnings;
@@ -38,6 +38,17 @@ use Helpers::AWS;
 use constant EXIT_FAILURE => 1;
 use constant EXIT_SUCCESS => 0;
 
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file `%s` is missing a node `%s`);
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file `%s` is missing field `%s` in node `%s`);
+use constant ERR_MSG_FAILED_TO_CREATE_PID_FILE  => qq(Failed to create PID file %s);
+use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter must be a positive integer);
+
 use constant ERR_MSG_ARGUMENT_CONFLICT         => qq(Command arguments --instance-id and --hostname cannot be combined. Use only one);
 use constant ERR_MSG_NO_REGIONS                => qq(Can't get a list of known AWS EC2 regions: %s);
 use constant ERR_MSG_UNKNOWN_REGION            => qq(Unknown AWS EC2 region %s);
@@ -49,61 +60,116 @@ use constant ERR_EC2_MALFORMATTED_RESERVATIONS => qq(AWS EC2 instance list for r
 use constant ERR_EC2_MALFORMATTED_INSTANCES    => qq(AWS EC2 instance list for region %s returned an incorrect JSON: Instance field for Reservation %s is missing or is not an array);
 
 our $logger = undef;
+our $cleanup_vars = undef;
 
 {
   my $opt = {
-                'TOOL_NAME'       => qq(aws-list-ec2-instances),
-                'TOOL_DESC'       => qq(Lists AWS EC2 instances),
-                'TOOL_VER_MAJOR'  => 0,
-                'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 16,
-                'regions'         => undef,
-                'instance_id'     => undef,
-                'hostname'        => undef,
-                'with_tags'       => 0,
-                'single_instance' => 0,
-                'stdout_json'     => 0,
-                'with-ami'        => 0,
-                'table'           => 0,
-                'list_all'        => 0,
-                'help'            => 0,
+              'TOOL_NAME'               => qq(aws-list-ec2-instances),
+              'TOOL_DESC'               => qq(Lists AWS EC2 instances),
+              'TOOL_VER_MAJOR'          => 0,
+              'TOOL_VER_MINOR'          => 0,
+              'TOOL_VER_PATCH'          => 17,
+
+              'regions'                 => undef,
+              'instance_id'             => undef,
+              'hostname'                => undef,
+              'with_tags'               => 0,
+              'single_instance'         => 0,
+              'stdout_json'             => 0,
+              'with-ami'                => 0,
+              'table'                   => 0,
+              'list_all'                => 0,
+
+              '_need-config'            => 0,
+              'log-tag'                 => undef,
+              'pid-file'                => undef,
+              'randomize-sleep-at-exit' => 0,
+              'sleep-at-exit'           => 0,
+              'verbose'                 => 0,
+              'help'                    => 0
             };
 
   $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
 
-  my $ret = GetOptions(   "with-tags"     => \$opt->{'with_tags'},
-                          "regions=s"     => \$opt->{'regions'},
-                          "region=s"      => \$opt->{'regions'},
-                          "instance-id=s" => \$opt->{'instance_id'},
-                          "hostname=s"    => \$opt->{'hostname'},
-                          "stdout-json"   => \$opt->{'stdout_json'},
-                          "table"         => \$opt->{'table'},
-                          "with-ami"      => \$opt->{'with-ami'},
-                          "all"           => \$opt->{'list_all'},
-                          "help"          => \$opt->{'help'}
+
+  my $ret = GetOptions( "config=s"                => \$opt->{'config'},
+
+                        "with-tags"               => \$opt->{'with_tags'},
+                        "regions=s"               => \$opt->{'regions'},
+                        "region=s"                => \$opt->{'regions'},
+                        "instance-id=s"           => \$opt->{'instance_id'},
+                        "hostname=s"              => \$opt->{'hostname'},
+                        "stdout-json"             => \$opt->{'stdout_json'},
+                        "table"                   => \$opt->{'table'},
+                        "with-ami"                => \$opt->{'with-ami'},
+                        "all"                     => \$opt->{'list_all'},
+
+                        "log-tag=s"               => \$opt->{'log-tag'},
+                        "pid-file=s"              => \$opt->{'pid-file'},
+                        "verbose"                 => \$opt->{'verbose'},
+                        "sleep-at-exit=s"         => \$opt->{'sleep-at-exit'},
+                        "randomize-sleep-at-exit" => \$opt->{'randomize-sleep-at-exit'},
+
+                        "help"                    => \$opt->{'help'}
                       );
 
   display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
 
   my $loggerConfig =  {
-                          'ident' => $opt->{'TOOL_NAME'},
-                          'loggers' => {
-                                          'stdout' => 0,
-                                          'stderr' => 1,
-                                       },
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, 'syslog' => { 'facility' => 'user' } },
                       };
-
-  $loggerConfig->{'loggers'}->{'stdout_json'} = 1 if ($opt->{'stdout_json'});
+  $loggerConfig->{'ident'} = $opt->{'log-tag'} if (!Helpers::Misc::isEmpty($opt->{'log-tag'}));
   $logger = Helpers::Logger->new($loggerConfig);
 
-  Helpers::Misc::display_and_exit(-1, ERR_MSG_ARGUMENT_CONFLICT) if (!Helpers::Misc::isEmpty($opt->{'instance_id'}) && !Helpers::Misc::isEmpty($opt->{'hostname'}));
-  $opt->{'single_instance'} = 1 if (!Helpers::Misc::isEmpty($opt->{'instance_id'}) || !Helpers::Misc::isEmpty($opt->{'hostname'}));
+  # handle pid file
 
-  $opt->{'regions'} = join(qq(,), Helpers::AWS::getAllAWSRegions()) if (Helpers::Misc::isEmpty($opt->{'regions'}));
+  if (!Helpers::Misc::isEmpty($opt->{'pid-file'}))
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s exists and only one %s can run at a time", $opt->{'pid-file'}, $opt->{'TOOL_NAME'})  if (Helpers::Misc::is_active_pid_in_file($opt->{'pid-file'}));
+      my $v = undef;
+      ($ret, $v) = Helpers::Misc::writeFile($opt->{'pid-file'}, $$ . "\n", { 'mode' => 0600 });
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_FAILED_TO_CREATE_PID_FILE, $opt->{'pid-file'}, $v) if (!$ret);
+      $cleanup_vars->{'remove_pidfile'} = $opt->{'pid-file'};
+    }
+
+  my $config          = undef;
+  my $config_json_ptr = undef;
+
+  if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
+      $config_json_ptr = \qq({});
+    }
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+
+  # finished dealing with a standard config
+
+  foreach my $f (keys %$opt)
+    {
+      $config->{$f} = $opt->{$f} if (defined $opt->{$f});
+    }
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_SLEEP_AT_EXIT_POSITIVE) if (!Helpers::Misc::isUnsignedInteger($opt->{'sleep-at-exit'}));
+  if ($opt->{'sleep-at-exit'} != 0)
+    {
+      my $v = $opt->{'sleep-at-exit'};
+      $v = int(rand($v)) if ($opt->{'randomize-sleep-at-exit'});
+      $cleanup_vars->{'sleep-at-exit'} = $v;
+    }
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_ARGUMENT_CONFLICT) if (!Helpers::Misc::isEmpty($config->{'instance_id'}) && !Helpers::Misc::isEmpty($config->{'hostname'}));
+  $opt->{'single_instance'} = 1 if (!Helpers::Misc::isEmpty($config->{'instance_id'}) || !Helpers::Misc::isEmpty($config->{'hostname'}));
+
+  $opt->{'regions'} = join(qq(,), Helpers::AWS::getAllAWSRegions()) if (Helpers::Misc::isEmpty($config->{'regions'}));
   my @regions = split(',', $opt->{'regions'});
   foreach my $this_region (@regions)
     {
-      Helpers::Misc::display_and_exit(-1, ERR_MSG_UNKNOWN_REGION, $this_region) if (!Helpers::AWS::isValidAWSRegion($this_region));
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_UNKNOWN_REGION, $this_region) if (!Helpers::AWS::isValidAWSRegion($this_region));
     }
 
   my @all_instances = ();
@@ -112,22 +178,22 @@ our $logger = undef;
     {
       my $region_list_ptr = undef;
       ($ret, $region_list_ptr) = Helpers::Misc::readFile("aws ec2 describe-instances --region $this_region|");
-      Helpers::Misc::display_and_exit(-1, ERR_EC2_NO_INSTANCES_IN_REGION, $this_region, $region_list_ptr) if (!$ret);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_EC2_NO_INSTANCES_IN_REGION, $this_region, $region_list_ptr) if (!$ret);
 
       my $reg_instance_data = undef;
       ($ret, $reg_instance_data) = Helpers::Misc::fromJSON($$region_list_ptr);
-      Helpers::Misc::display_and_exit(-1, ERR_EC2_MALFORMATTED_JSON, $this_region, $reg_instance_data) if (!$ret);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_EC2_MALFORMATTED_JSON, $this_region, $reg_instance_data) if (!$ret);
 
       if (Helpers::Misc::isEmpty($reg_instance_data->{'Reservations'}) || ref $reg_instance_data->{'Reservations'} ne qq(ARRAY))
         {
-          Helpers::Misc::display_and_exit(-1, ERR_EC2_MALFORMATTED_RESERVATIONS, $this_region);
+          Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_EC2_MALFORMATTED_RESERVATIONS, $this_region);
         }
 
       foreach my $this_reservation (@{$reg_instance_data->{'Reservations'}})
         {
           if (Helpers::Misc::isEmpty($this_reservation->{'Instances'}) || ref $this_reservation->{'Instances'} ne qq(ARRAY))
             {
-              Helpers::Misc::display_and_exit(-1, ERR_EC2_MALFORMATTED_INSTANCES, $this_region, $this_reservation->{'ReservationId'});
+              Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_EC2_MALFORMATTED_INSTANCES, $this_region, $this_reservation->{'ReservationId'});
             }
           foreach my $this_instance (@{$this_reservation->{'Instances'}})
             {
@@ -147,12 +213,13 @@ our $logger = undef;
                                     'PublicIp'      => $this_instance->{'PublicIpAddress'},
                                     'PrivateIp'     => $this_instance->{'PrivateIpAddress'},
                                     'InstanceId'    => $this_instance->{'InstanceId'},
-                                    "AMI"           => $this_instance->{'ImageId'},
                                     'RunState'      => $this_instance->{'State'}->{'Name'},
                                     'AZ'            => $this_instance->{'Placement'}->{'AvailabilityZone'},
                                     'LaunchedAt'    => $this_instance->{'LaunchTime'},
                                     'InstanceType'  => $this_instance->{'InstanceType'},
                                   };
+              $aws_instance->{'AMI'} = $this_instance->{'ImageId'} if ($opt->{'with-ami'} == 1);
+
               next if ($aws_instance->{'RunState'} eq 'terminated' && !$opt->{'list_all'});
 
               $aws_instance->{'Tags'} = $tags if ($opt->{'with_tags'});
@@ -188,19 +255,22 @@ our $logger = undef;
         }
     }
 
-  if ($opt->{'table'})
+  if ($config->{'table'})
     {
-      result_as_table(\@all_instances);
+      my $table_opt = {};
+      $table_opt->{'with-ami'} = 1 if ($config->{'with-ami'});
+
+      result_as_table(\@all_instances, $table_opt);
       exit( EXIT_SUCCESS );
     }
 
   my $ptr = undef;
   if (my $total_instances = scalar @all_instances)
     {
-      if ($total_instances == 1 && $opt->{'single_instance'}) { $ptr = $all_instances[0]; } else { $ptr = \@all_instances; }
+      if ($total_instances == 1 && $config->{'single_instance'}) { $ptr = $all_instances[0]; } else { $ptr = \@all_instances; }
     }
   my $result_obj = undef;
-  if ($opt->{'stdout_json'})
+  if ($config->{'stdout_json'})
     {
       $result_obj->{'status'} = qq(200);
       $result_obj->{'object'} = $ptr;
@@ -210,7 +280,7 @@ our $logger = undef;
       $result_obj = $ptr;
     }
   my $object_json = undef;
-  ($ret, $object_json) = Helpers::Misc::toJSON($result_obj, {'pretty' => 1, 'undef_ok' => 1 });
+  ($ret, $object_json) = Helpers::Misc::toJSON($result_obj, {'pretty' => 1, 'undef_ok' => 1, 'canonical' => 1 });
   print $object_json;
 
   exit(EXIT_SUCCESS);
@@ -226,51 +296,124 @@ sub display_help_and_exit
 
   printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
   printf("Options:\n\n");
-  printf("      --regions=<list>   List instances from AWS EC2 regions <list>. Region\n");
-  printf("                         names must be of comma separated\n");
-  printf("                         Default: all known regions\n");
-  printf("      --instance-id=<id> Only display information about instance <id>\n");
-  printf("                         Default: all instances\n");
-  printf("      --hostname=<name>  Only display information about instance with hostname <host>\n");
-  printf("                         Default: all instances\n");
-  printf("      --with-tags        Include all tags assigned to instances\n");
-  printf("                         Default: no\n");
-  printf("      --with-ami         Include AMI id the instance was launched from\n");
-  printf("                         Default: no\n");
-  printf("      --all              Include instrances in the 'Terminated' state\n");
-  printf("                         Default: no\n");
-  printf("      --stdout-json      Output results as a JSON - used for creating pipelines\n");
-  printf("                         Default: no\n");
-  printf("      --table            Output results as a table\n");
-  printf("                         Default: no\n");
-  printf("      --help             This help\n\n");
+  printf("  --config=<config.json>         Read redis server configuration from <config.json> file\n");
+  printf("                                 Default: %s\n", $opt->{'config'});
+  printf("  --regions=<list>               List instances from AWS EC2 regions <list>. Region\n");
+  printf("                                 names must be of comma separated\n");
+  printf("                                 Default: all known regions\n");
+  printf("  --instance-id=<id>             Only display information about instance <id>\n");
+  printf("                                 Default: all instances\n");
+  printf("  --hostname=<name>              Only display information about instance with hostname <host>\n");
+  printf("                                 Default: all instances\n");
+  printf("  --with-tags                    Include all tags assigned to instances\n");
+  printf("                                 Default: no\n");
+  printf("  --with-ami                     Include AMI id the instance was launched from\n");
+  printf("                                 Default: no\n");
+  printf("  --all                          Include instrances in the 'Terminated' state\n");
+  printf("                                 Default: no\n");
+  printf("  --stdout-json                  Output results as a JSON - used for creating pipelines\n");
+  printf("                                 Default: no\n");
+  printf("  --table                        Output results as a table\n");
+  printf("                                 Default: no\n");
+  printf("  --sleep-at-exit=<sleep-sec>    Sleep for <sleep-sec> before exiting\n");
+  printf("                                 Default: %s\n", $opt->{'sleep-at-exit'});
+  printf("  --randomize-sleep-at-exit      Randomize sleep at exit delay between its value and 0\n");
+  printf("                                 Default: no\n");
+  printf("  --log-tag=<tag>                Set the logging tag to <tag>\n");
+  printf("                                 Default: %s\n", $opt->{'TOOL_NAME'});
+  printf("  --pid-file=<pidfile.pid>       Store the PID in a file <pidfile.pid>\n");
+  printf("                                 Default: none\n");
+  printf("  --verbose                      Include additional logging\n");
+  printf("                                 Default: No\n");
+  printf("  --help                         This help.\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
 
-  exit(EXIT_SUCCESS);
+  exit(EXIT_FAILURE);
+}
 
+END {
+  sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
+  unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
 }
 
 sub result_as_table
 {
   my $instance_list_ptr = shift @_;
+  my $opt = shift @_;
 
-  my $i = 0;
-  my $extra_space = '                         ';
+  my $header =  {
+                  'ServerName'  => 'Hostname',
+                  'AZ'          => 'AZ',
+                  'PublicIp'    => 'External IPv4',
+                  'PrivateIp'   => 'Internal IPv4',
+                  'RunState'    => 'State',
+                };
+  $header->{'AMI'} = 'AMI' if ($opt->{'with-ami'});
+
+  my @lines = ();
+  my $header_line = fmt_line($header);
+  push @lines, $header_line;
+  my $header_len = length($header_line);
+
+  push @lines, "-" x $header_len;
+  my $i = 1;
   foreach my $t (@$instance_list_ptr)
     {
-      foreach my $k (qw/PublicIp PrivateIp InstanceId RunSate ServerName AZ/)
-        {
-          if (defined $t->{$k})
-            {
-              $t->{$k} .= $extra_space;
-            }
-          else
-            {
-              $t->{$k} = $extra_space;
-            }
-        }
+      $t->{'counter'} = $i;
+      my $this_line = fmt_line($t);
+      push @lines, $this_line;
       $i++;
-      printf("%3d| %.20s | %.10s | %.15s | %.15s | %.15s | %-21s\n", $i, $t->{'ServerName'}, $t->{'AZ'}, $t->{'PublicIp'}, $t->{'PrivateIp'}, $t->{'RunState'}, $t->{'AMI'});
     }
+  printf("%s", join("\n", @lines));
+}
 
+sub fmt_line {
+
+  my $t = shift @_;
+
+  my $map = {
+              'counter'     =>  {
+                                  'formatter'   => '%3s| ',
+                                  'skip-empty'  => 0,
+                                },
+              'ServerName'  =>  {
+                                  'formatter'   => '%-20.20s | ',
+                                  'skip-empty'  => 0,
+                                },
+              'AZ'          =>  {
+                                  'formatter'   => '%-10.10s | ',
+                                  'skip-empty'  => 0,
+                                },
+              'PublicIp'    =>  {
+                                  'formatter'   => '%-15.15s | ',
+                                  'skip-empty'  => 0,
+                                },
+              'PrivateIp'    => {
+                                  'formatter'   => '%-15.15s | ',
+                                  'skip-empty'  => 0,
+                                },
+              'RunState'     => {
+                                  'formatter'   => '%-10.10s',
+                                  'skip-empty'  => 0,
+                                },
+              'AMI'     =>      {
+                                  'formatter'   => ' | %-21s',
+                                  'skip-empty'  => 1,
+                                },
+            };
+
+  my $this_line = '';
+  foreach my $k (qw/counter ServerName AZ PublicIp PrivateIp RunState AMI/)
+    {
+      my $v = $t->{$k};
+      if (Helpers::Misc::isEmpty($v))
+        {
+          next if ($map->{$k}->{'skip-empty'});
+          $v = '';
+        }
+
+      $this_line .= sprintf($map->{$k}->{'formatter'}, $v);
+
+    }
+  return $this_line;
 }
