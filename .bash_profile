@@ -2,15 +2,24 @@
 #
 # File executed by bash(1) shell upon login
 #
-# tabs: 4. Convert tabs to spaces
+# tabs: 2. Convert tabs to spaces
 
 # since this can be source'd we should only either use return OR exit
 # depending on if it was sourced
+
+export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/opt/bin:/opt/sbin:$HOME/bin
+export EDITOR=joe
 
 if [[ "$0" != "$BASH_SOURCE" ]]; then
     ret=return
 else
     ret=exit
+fi
+
+# The rest should be executed only in the interactive sessions.
+
+if [[ ! -t 1 ]] ; then
+  $ret 0    # non-interactive, exit
 fi
 
 if [ -e $HOME/.bash_aliases ]; then
@@ -25,12 +34,8 @@ if [ -e $HOME/.bash_colors ]; then
     . $HOME/.bash_colors
 fi
 
-export PATH=/bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/opt/bin:/opt/sbin:$HOME/bin
-
-# The rest should be executed only in the interactive sessions.
-
-if [[ ! -t 1 ]] ; then
-  $ret 0    # non-interactive, exit
+if [[ -e $HOME/.bash_fzf ]] ; then
+  . $HOME/.bash_fzf
 fi
 
 # see if line-editing is enabled, it may be useful
@@ -47,33 +52,83 @@ fi
 # across all workstation terminals/windows/tmux/screens
 #
 
-unset PROMPT_COMMAND
+# unset PROMPT_COMMAND
 
-PECO_HIST_SIZE=10000 # allow peco to access upto a 1000 commands
-PECO_HIST_KEY="peco-backend"
+PECO_HIST_SIZE=10000        # allow peco to access upto a 1000 commands
+HISTSIZE=1000               # set bash history size in memory (lines)
+HISTFILESIZE=${HISTSIZE}    # set bash history size in a file (lines)
 
-peco_backend=(which peco-redis-backend)
-if [[ -z $peco_backend ]]; then
-   peco_queries_backend="history ${PECO_HIST_SIZE} | tac | sed 's/^[[:space:]]\+[[:digit:]]\+[[:space:]]\+//'| awk '!seen[$0]++'"
-else
-   peco_queries_base="peco-redis-backend --redis-key=${PECO_HIST_KEY} --max-entries=${PECO_HIST_SIZE}"
-   peco_queries_backend="$peco_queries_base --query"
-   PROMPT_COMMAND="(history 1 | $peco_queries_base --store)"
-fi
+# peco_history()
+#
+# dynamically handle a command line history lookup either
+# using peco-redis-backend or using standard bash history.
+#
+# peco_history does nothing if peco cannot be ran on the system
+#
 
 function peco_history() {
-    BUFFER=$($peco_queries_backend | peco --prompt "COMMAND LINE >> ")
-    READLINE_LINE=${BUFFER}
-    READLINE_POINT=${#READLINE_LINE}
+
+  local peco_present
+  local peco_backend
+  local hist_buffer
+
+  peco_present=$(which peco)
+
+  # if there's no peco, do nothing
+
+  if [[ "x$peco_present" == "x" ]] ; then
+    return
+  fi
+  peco_backend=$(which peco-redis-backend)
+  if [[ "x$peco_backend" == "x" ]] ; then
+    hist_buffer=`history | sed 's/^[[:space:]]\+[[:digit:]]\+[[:space:]]\+//' | awk '!seen[$0]++' | tac`
+  else
+    hist_buffer=$(peco-redis-backend --redis-key=peco-backend --max-entries=${PECO_HIST_SIZE} --query)
+  fi
+
+  BUFFER=$(echo "${hist_buffer}" | peco --prompt "COMMAND LINE >> ")
+
+  READLINE_LINE=${BUFFER}
+  READLINE_POINT=${#READLINE_LINE}
+
 }
 
-# if peco exists, bind Ctrl-R to it.
+# peco_update_history()
+#
+# function is called by the interactive prompt.
+# if peco-redis-backend is present then the query is pushed into it.
 
-peco_present=(which peco)
-if [ ! -z $peco_present ]; then
-    if [[ $LINE_EDITING -eq "1" ]]; then
-        bind -x '"\C-r":peco_history'
+function peco_update_history {
+  local peco_backend
+  local peco_present
+  local need_skipline
+
+  peco_backend=$(which peco-redis-backend)
+  peco_present=$(which peco)
+  need_skipline=1
+  if [[ "x$peco_present" == "x" ]] ; then
+    need_skipline=0
+    echo
+    echo -e "${COLOR_RESET_ALL}${COLOR_BG_RED} [peco fuzzy matcher is not accessible] ${COLOR_RESET_ALL}"
+  fi
+  if [[ "x$peco_backend" == "x" ]] ; then
+    if [[ "$need_skipline" == "1" ]] ; then
+      echo
     fi
+    echo -e "${COLOR_RESET_ALL}${COLOR_BG_RED} [peco-redis-backend is not accessible] ${COLOR_RESET_ALL}"
+    return
+  fi
+  history 1 | peco-redis-backend --redis-key=peco-backend --max-entries=${PECO_HIST_SIZE} --store
+}
+
+# execute peco_update_history every time the prompt is rendered
+
+PROMPT_COMMAND=peco_update_history
+
+# if LINE_EDITING is possible, bind Ctrl-R to peco_history.
+
+if [[ $LINE_EDITING -eq "1" ]]; then
+  bind -x '"\C-r":peco_history'
 fi
 
 # for some reason xterm mapping of colors does not match ALACRITTY mappings but since we want identical prompts
