@@ -92,6 +92,7 @@ MISCBINS="	batcheck
 			tmux-dev-workspace
 			x-workspace-setup-code.alacritty
 			x-workspace-setup-code.xterm
+			x-launch-in-location
 			xterm.wrapper
 			take_notes"
 
