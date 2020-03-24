@@ -12,9 +12,18 @@ use DateTime;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.30";
+  our $VERSION = "0.34";
 }
 
+# readfile() and readfile_new() are functions to slurp content of a file.
+# The difference is now an empty file is handled.
+#
+# readFile_new() returns (1, undef) for an empty file
+# readFile()     returns (1, $dptr) where dptr is a reference to ''
+#
+# NOTICE: THIS FUNCTION API IS DEPRECATED. WHILE CODE IS BEING TRANSITIONED TO THE
+#         WAY OF HANDLING -EMPTY- FILES USE readFile_new() DIRECTLY
+#
 #    FUNCTION: ($ret, $content_ptr) = readFile($fname)
 #
 # DESCRIPTION: Slurps content of file with a name $fname and returns it to the caller
@@ -26,10 +35,22 @@ BEGIN {
 #                                   $content_ptr is set to an error message
 #                               1 - success, $content_ptr is a reference to the content of the file
 #
-#              $content_ptr   - Reference to the content of the file or reference -1
+#              $content_ptr   - Reference to the content of the file or an error message
 #
 
 sub readFile
+{
+  my $fname = shift @_;
+
+  my ($ret, $dptr) = readFile_new($fname);
+  return ($ret, $dptr) if (!$ret);
+
+  my $old_empty = '';
+  return ($ret, \$old_empty) if (!defined $dptr);
+  return ($ret, $dptr);
+}
+
+sub readFile_new
 {
   my $fname = shift @_;
   my $txt = '';
@@ -45,19 +66,18 @@ sub readFile
     }
   else
     {
-      $fh = *STDIN;
-      $is_stdin = 1;
+      $fh        = *STDIN;
+      $fname_txt = "<STDIN>";
+      $is_stdin  = 1;
     }
+  return (0, "Can't open $fname_txt") if (!defined $fh);
 
-  if (defined $fh)
-    {
-      while (my $line = <$fh>) { $txt .= $line; }
-      $fh->close() if (!$is_stdin);
-      $ret = 1;
-    }
-  return ($ret, \$txt) if ($ret);
-  return ($ret, qq(Can't open $fname_txt));
+  while (my $line = <$fh>) { $txt .= $line; }
+  $fh->close() if (!$is_stdin);
+  return (1, \$txt) if ($txt ne '');
+  return (1, undef);
 }
+
 
 #    FUNCTION: ($ret, $r) = writeFile($fname, $text, $opts)
 #
@@ -453,6 +473,15 @@ sub timestamp_in_ms
   my $dt = DateTime->now();
   my $etime_ms = int($dt->epoch()) * 1000;
   return sprintf("%s", $etime_ms);
+}
+
+sub datetime_ymd_hms
+{
+  my $dt = shift @_;
+
+  $dt = DateTime->now() if (!defined $dt);
+  my $now_str = sprintf("%s %s", $dt->ymd, $dt->hms);
+  return $now_str;
 }
 
 sub is_odd
