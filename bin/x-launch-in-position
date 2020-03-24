@@ -4,7 +4,7 @@
 #
 # Launches x application in a specific window position
 #
-# version 0.0.2
+# version 0.0.3
 
 use strict;
 use warnings;
@@ -66,7 +66,7 @@ $SIG{CHLD} = sub {
               'TOOL_DESC'               => qq(Places newly launched X application in a specific postion),
               'TOOL_VER_MAJOR'          => 0,
               'TOOL_VER_MINOR'          => 0,
-              'TOOL_VER_PATCH'          => 2,
+              'TOOL_VER_PATCH'          => 3,
 
               'desktop'                 => undef,
               'pos-x'                   => undef,
@@ -131,7 +131,7 @@ $SIG{CHLD} = sub {
   my $config_json_ptr = undef;
 
   if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
-  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile_new($opt->{'config'});
   if (!$ret)
     {
       Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
@@ -262,8 +262,8 @@ sub get_window_id_by_pid
   my $dptr = undef;
   while ($attempt < $opt->{'max-attempts'})
     {
-      ($ret, $dptr) = Helpers::Misc::readFile("wmctrl -lp|");
-      if ($ret && $$dptr ne '')
+      ($ret, $dptr) = Helpers::Misc::readFile_new("wmctrl -lp|");
+      if ($ret && defined $dptr)
         {
           my @lines = split('\n', $$dptr);
           foreach my $this_line (@lines)
