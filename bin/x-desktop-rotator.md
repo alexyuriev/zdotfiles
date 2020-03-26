@@ -16,7 +16,7 @@ It is 2020. Computers are fast enough. To flip to the next desktop use:
 
 To flip to previous desktop use:
 
-`x-desktop-rotator --config=/home/alex/.config/config-x-desktop-rotator.json --next`
+`x-desktop-rotator --config=/home/alex/.config/config-x-desktop-rotator.json --previous`
 
 
 Add this to openbox rc.xml to start using the x-desktop-rotator
