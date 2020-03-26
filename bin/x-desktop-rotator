@@ -302,8 +302,6 @@ sub switch_sticky_apps {
       foreach my $this_monitor ( @{$monitors})
         {
 
-          printf("Monitor: %s\n", Dumper($this_monitor));
-
           # window is sticky
           #      if its top left corner is on a sticky monitor AND
           #      its horizontal does not go over the size of a sticky monitor ( is this even needed ? )
