@@ -93,6 +93,7 @@ MISCBINS="	batcheck
 			x-workspace-setup-code.alacritty
 			x-workspace-setup-code.xterm
 			x-launch-in-location
+			x-desktop-rotator
 			xterm.wrapper
 			take_notes"
 

@@ -1,0 +1,366 @@
+#!/usr/bin/perl
+
+# x-desktop-rotator
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Helpers::Logger;
+use Helpers::Misc;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file `%s` is missing a node `%s`);
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file `%s` is missing field `%s` in node `%s`);
+use constant ERR_MSG_FAILED_TO_CREATE_PID_FILE  => qq(Failed to create PID file %s);
+use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter must be a positive integer);
+
+our $logger = undef;
+our $cleanup_vars = undef;
+
+{
+  my $opt = {
+              'TOOL_NAME'               => qq(desktop-rotator),
+              'TOOL_DESC'               => qq(Rotates virtual desktops),
+              'TOOL_VER_MAJOR'          => 0,
+              'TOOL_VER_MINOR'          => 0,
+              'TOOL_VER_PATCH'          => 1,
+
+              'config'                  => undef,
+              'next'                    => 0,
+              'previous'                => 0,
+
+              '_need-config'            => 1,
+              'log-tag'                 => undef,
+              'pid-file'                => undef,
+              'randomize-sleep-at-exit' => 0,
+              'sleep-at-exit'           => 0,
+              'verbose'                 => 0,
+              'help'                    => 0
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $ret = GetOptions( "config=s"                => \$opt->{'config'},
+
+                        "previous"                => \$opt->{'previous'},
+                        "next"                    => \$opt->{'next'},
+
+                        "log-tag=s"               => \$opt->{'log-tag'},
+                        "pid-file=s"              => \$opt->{'pid-file'},
+                        "verbose"                 => \$opt->{'verbose'},
+                        "sleep-at-exit=s"         => \$opt->{'sleep-at-exit'},
+                        "randomize-sleep-at-exit" => \$opt->{'randomize-sleep-at-exit'},
+
+                        "help"                    => \$opt->{'help'}
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  # handle pid file
+
+  if (!Helpers::Misc::isEmpty($opt->{'pid-file'}))
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s exists and only one %s can run at a time", $opt->{'pid-file'}, $opt->{'TOOL_NAME'})  if (Helpers::Misc::is_active_pid_in_file($opt->{'pid-file'}));
+      my $v = undef;
+      ($ret, $v) = Helpers::Misc::writeFile($opt->{'pid-file'}, $$ . "\n", { 'mode' => 0600 });
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_FAILED_TO_CREATE_PID_FILE, $opt->{'pid-file'}, $v) if (!$ret);
+      $cleanup_vars->{'remove_pidfile'} = $opt->{'pid-file'};
+    }
+
+  my $config          = undef;
+  my $config_json_ptr = undef;
+
+  if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile_new($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
+      $config_json_ptr = \qq({});
+    }
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+
+  {
+    foreach my $f (qw/pinned-monitors/)
+      {
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_NODE, $opt->{'config'}, $f) if (Helpers::Misc::isEmpty($config->{$f}));
+      }
+
+    Helpers::Misc::display_and_exit(EXIT_FAILURE, ".pinned-monitors is not an array") if (ref($config->{'pinned-monitors'}) ne qq(ARRAY));
+
+    my $monitor_count = 0;
+    foreach my $this_monitor (@{$config->{'pinned-monitors'}})
+      {
+        my $p = sprintf("pinned-monitors[%s]", $monitor_count);
+        foreach my $f (qw/start-x start-y end-x end-y/)
+          {
+            Helpers::Misc::display_and_exit(EXIT_FAILURE, "Configuration file %s field %s of node %s is not unsigned integer", $opt->{'config'}, $f, $p) if (!Helpers::Misc::isUnsignedInteger($this_monitor->{$f}));
+          }
+        my $f = 'name';
+        Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_NODE, $opt->{'config'}, $f, $p) if (Helpers::Misc::isEmpty($this_monitor->{$f}));
+      }
+  }
+
+  # finished dealing with a standard config
+
+  foreach my $f (keys %$opt) { $config->{$f} = $opt->{$f} if (defined $opt->{$f});}
+
+  {
+      my $i = $config->{'previous'} + $config->{'next'};
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "One and only one of --previous or --next switches can be used at a single time") if ($i != 1);
+  }
+
+  my $desktops = undef;
+  ($ret, $desktops) = x11_get_desktops();
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to get a list of X desktops: %s", $desktops) if (!$ret);
+
+  my $windows = undef;
+  ($ret, $windows) = x11_get_windows();
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to get a list of X windows: %s", $windows) if (!$ret);
+
+  my $active_id = undef;
+  ($ret, $active_id) = get_active_desktop($desktops);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to get an active desktop id") if (!$ret);
+
+  my $new_id = undef;
+  if ($config->{'next'}) { ($ret, $new_id) = get_next_desktop($desktops, $active_id); } else { ($ret, $new_id) = get_previous_desktop($desktops, $active_id); }
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to get a new desktop id") if (!$ret);
+
+  Helpers::Misc::display_and_exit(EXIT_SUCCESS, "Desktop is not switched") if ($active_id == $new_id);
+
+  switch_sticky_apps( $windows,
+                      {
+                        'from'  =>  $active_id,
+                        'to'    =>  $new_id,
+                      },
+                      $config->{'pinned-monitors'}
+                    );
+
+
+    exit(EXIT_SUCCESS);
+}
+
+exit(EXIT_FAILURE);
+
+sub x11_get_desktops
+{
+
+  my ($ret, $dobj) = Helpers::Misc::readFile_new("wmctrl -d|");
+  return (0, $dobj) if (!$ret);
+  return (0, "wmctrl -d result was not understood") if (!defined $dobj);
+
+  my @lines = split("\n", $$dobj);
+
+  my $desktops = undef;
+  foreach my $this_line (@lines)
+    {
+      $this_line = Helpers::Misc::collapse_spaces($this_line);
+      my $junk = undef;
+
+      my $desktop_id    = undef;
+      my $active_status = undef;
+      my $res_string    = undef;
+      my $desktop_name  = undef;
+
+      ($desktop_id, $active_status, $junk, $res_string, $junk, $junk, $junk, $junk, $junk, $desktop_name) = split(' ', $this_line, 10);
+
+        if ($active_status eq '*') { $active_status = 1 } else { $active_status = 0 }
+
+        my $size_x = undef;
+        my $size_y = undef;
+
+        ($size_x, $size_y, $junk) = split('x', $res_string, 2);
+
+        my $this_desktop = {
+            'desktop-id'    => $desktop_id,
+            'active'        => $active_status,
+            'size-x'        => $size_x,
+            'size-y'        => $size_y,
+            'desktop-name'  => $desktop_name,
+        };
+        $desktops->{$desktop_id} = $this_desktop;
+      }
+    return (1, $desktops);
+}
+
+sub x11_get_windows
+{
+  my ($ret, $dobj) = Helpers::Misc::readFile_new("wmctrl -lG|");
+  return (0, $dobj) if (!$ret);
+  return (0, "wmctrl -lG result was not understood") if (!defined $dobj);
+
+  my @lines = split("\n", $$dobj);
+
+  my $windows = undef;
+  foreach my $this_line (@lines)
+    {
+      $this_line = Helpers::Misc::collapse_spaces($this_line);
+      my $junk = undef;
+
+      my $window_id   = undef;
+      my $desktop_id  = undef;
+      my $pos_x       = undef;
+      my $pos_y       = undef;
+
+      my $size_x      = undef;
+      my $size_y      = undef;
+
+      my $window_name = undef;
+
+      ($window_id, $desktop_id, $pos_x, $pos_y, $size_x, $size_y, $junk, $window_name) = split(' ', $this_line, 8);
+
+      my $this_window = {
+          'window-id'     => $window_id,
+          'desktop-id'    => $desktop_id,
+          'start-x'       => $pos_x,
+          'start-y'       => $pos_y,
+          'end-x'         => $pos_x + $size_x,
+          'end-y'         => $pos_y + $size_y,
+          'size-x'        => $size_x,
+          'size-y'        => $size_y,
+          'window-name'   => $window_name,
+      };
+      $windows->{$window_id} = $this_window;
+    }
+  return (1, $windows);
+}
+
+sub get_active_desktop {
+  my $desktops = shift @_;
+
+  foreach my $id (keys %$desktops)
+      {
+          return (1, $id) if ($desktops->{$id}->{'active'} == 1);
+      }
+  return (0, 0);
+}
+
+sub get_next_desktop {
+  my $desktops = shift @_;
+  my $active_desktop = shift @_;
+
+  my @sorted_list = sort keys %$desktops;
+
+  return (1, 0) if ($active_desktop == scalar @sorted_list - 1 ); # it is last, so the next one is first
+  return (1, $active_desktop + 1);
+}
+
+sub get_previous_desktop {
+  my $desktops = shift @_;
+  my $active_desktop = shift @_;
+
+  my @sorted_list = sort keys %$desktops;
+
+  return (1, scalar @sorted_list - 1) if ($active_desktop == 0 ); # if we are at the first, go to the last one
+  return (1, $active_desktop - 1);
+}
+
+sub switch_sticky_apps {
+  my $windows  = shift @_;
+  my $cmd      = shift @_;
+  my $monitors = shift @_;
+
+  foreach my $win_id ( keys %$windows)
+    {
+      my $this_window = $windows->{$win_id};
+
+      next if ($this_window->{'desktop-id'} != $cmd->{'from'});
+
+      my $sticky = 0;
+      foreach my $this_monitor ( @{$monitors})
+        {
+
+          printf("Monitor: %s\n", Dumper($this_monitor));
+
+          # window is sticky
+          #      if its top left corner is on a sticky monitor AND
+          #      its horizontal does not go over the size of a sticky monitor ( is this even needed ? )
+          #
+          # TODO: figure out how to deal with decoration properly. Right now handle them via window-skey-x and window-skew-y
+
+          next if (!  (       ( $this_window->{'start-x'} >= $this_monitor->{'start-x'} )
+                          &&  ( $this_window->{'start-y'} >= $this_monitor->{'start-y'} )
+                          &&  ( $this_window->{'end-x'}   <= $this_monitor->{'end-x'}   )
+                        # &&  ( $this_window->{'end-y'}   <= $this_monitor->{'end-y'}      ) # don't check the bottom right corner
+                      )
+                  );
+          $sticky = 1;
+          last;
+        }
+      next if (!$sticky);
+
+      my $move_cmd = sprintf("wmctrl -i -r %s -t %s", $this_window->{'window-id'}, $cmd->{'to'});
+      my $ret = system($move_cmd);
+    }
+  my $switch_desktop_cmd = sprintf("wmctrl -s %s", $cmd->{'to'});
+  my $ret = system($switch_desktop_cmd);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to switch to desktop %s", $cmd->{'to'}) if ($ret != 0);
+}
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("  --config=<config.json>         Read configuration from <config.json> file\n");
+  printf("                                 Default: %s\n", $opt->{'config'});
+  printf("  --next                         Switch to the next desktop\n");
+  printf("                                 Default: No\n");
+  printf("  --previous                     Switch to the previous desktop\n");
+  printf("                                 Default: No\n");
+  printf("  --sleep-at-exit=<sleep-sec>    Sleep for <sleep-sec> before exiting\n");
+  printf("                                 Default: %s\n", $opt->{'sleep-at-exit'});
+  printf("  --randomize-sleep-at-exit      Randomize sleep at exit delay between its value and 0\n");
+  printf("                                 Default: no\n");
+  printf("  --log-tag=<tag>                Set the logging tag to <tag>\n");
+  printf("                                 Default: %s\n", $opt->{'TOOL_NAME'});
+  printf("  --pid-file=<pidfile.pid>       Store the PID in a file <pidfile.pid>\n");
+  printf("                                 Default: none\n");
+  printf("  --verbose                      Include additional logging\n");
+  printf("                                 Default: No\n");
+  printf("  --help                         This help.\n\n");
+  printf("This tool relies on pre-configured aws utility\n\n");
+
+  exit(EXIT_FAILURE);
+}
+
+END {
+  sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
+  unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
+}
+
