@@ -36,10 +36,10 @@ sre-sign-debian-package        | Signs a Debian package because debsig is just a
 take-screenshot                | Takes a screen shot of an area
 tmux-dev-workspace             | Sets up a tmux workspace ( 3 windows )
 url-2-file                     | Stores content of the URL in a file using easily assembleable configuration
-xterm.wrapper                  | Wrapper for xterm to play nicely with https://github.com/alacritty/alacritty - GPU accelerated terminal
+xterm.wrapper                  | Wrapper for xterm to play nicely with [alacritty](https://github.com/alacritty/alacritty) - GPU accelerated terminal
 x-workspace-setup-code         | Called by the X manager to create a single work environment
 x-launch-in-location           | Launches an X application with a specific window position
-x-desktop-rotator              | Rotates desktop while maintaining pinned windows
+x-desktop-rotator              | [Rotates desktop while maintaining pinned windows](bin/x-desktop-rotator.md)
 extra-non-matching-lines       | Displays the lines in a file that do not have equivalent lines in another file
 sre-push-to-redis-queue        | Pushes lines of a file into a Redis queue.
 sre-fail-if-bad-redis-hash-key | Attempts to fetch a specific field of a redis hash and checks returned value. Exits 0 on a match, 1 on error. Very useful to ensure that redis is in the right state for async tools manipulating it.
