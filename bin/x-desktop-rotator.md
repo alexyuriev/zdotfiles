@@ -1,4 +1,4 @@
-# x-desktop-rotator
+# x-desktop-rotator - wmctrl wrapper
 
 ## Rotate X desktop while maintaining sticky windows
 
@@ -75,3 +75,5 @@ The following is my `config-x-desktop-rotator.json`. It tells x-desktop-rotator 
 }
 
 ```
+
+`"pinned-monitors"` is a list of boxes that define confines of pinned/sticky areas. Those boxes typically match the monitors. 0,0 is the top left corner of the desktop. If a window is within the confines of a pinned/sticky area the window will follow a switch of a desktop.
