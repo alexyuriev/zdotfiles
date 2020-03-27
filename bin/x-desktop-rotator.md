@@ -1,8 +1,8 @@
 # x-desktop-rotator - wmctrl wrapper
 
-## Rotate X desktop while maintaining sticky windows
+## Problem
 
-Do modern desktop environments annoy you? Do you find them bulky, overly opinionated and optimized for pedestrian setups? I do. To me the best environment is a few monitors ( in my case 4x 4K) managed by a small, fast and never stand in a way window manager called OpenBox that I can easily configure to do what I want, including having multiple virtual desktops. It does, however, have a very annoying flaw - it lacks support for sticky windows i.e. windows that follow you around when swithing desktops.
+OpenBox does not support per monitor sticky windows. When switching from one virtual desktop to another it is not possible to keep some windows, typically mapped to specific monitors to follow the desktop switch.
 
 ## Why sticky windows?
 
