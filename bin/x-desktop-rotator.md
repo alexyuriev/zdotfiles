@@ -51,7 +51,7 @@ Add the following to openbox `rc.xml` to start using the `x-desktop-rotator`, re
          [4K-4]
 
 ```
-4K-1 is a monitor that gets floating windows. On my main desktop it carries `alacritty` running `tmux`. On other desktops it gets floating windows. 4K-2 monitor has an editor on a main desktop or whatever I'm currently working with on ( `alacritty` or `xterm` ). 4K-3 is a monitor containing browser-1 and some additional status real-time information displays that I want to always follow me around regardless of the desktop i have active. Finally 4K-4 is a small 4K monitor sitting below the middle of 4K-2 and 4K-3. It runs a different web browser and some other applications that I want to always follow me around.
+4K-1 is a monitor that gets floating windows. On my main desktop it carries `alacritty` running `tmux`. On other desktops it gets random floating windows. 4K-2 monitor has an editor on a main desktop or whatever I'm currently working with on ( `alacritty` or `xterm` ). 4K-3 is a monitor containing browser-1 and some additional status real-time information displays that I want to always follow me around regardless of the desktop i have active. Finally 4K-4 is a small 4K monitor sitting below the middle of 4K-2 and 4K-3. It runs a different web browser and some other applications that I want to always follow me around.
 
 The following is my `config-x-desktop-rotator.json`. It tells x-desktop-rotator that any window that is located within 'most-right-4k' or 'right-low-4k' monitor is to follow desktop switching.
 
