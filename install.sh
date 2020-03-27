@@ -105,6 +105,7 @@ ROOTDOTFILES="	.ackrc
 				.bash_profile
 				.bash_colors
 				.bash_aliases
+				.bash_fzf
 				.nvidia-settings-rc
 				.compton.conf
 				.tmux.conf
