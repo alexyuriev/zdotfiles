@@ -10,7 +10,9 @@ That's simple: web browser. You want to have web browser follow you around. Ther
 
 ## Solution: Replace internal OpenBox desktop switcher with x-desktop-rotator
 
-It is 2020. Computers are fast enough. To flip to the next desktop use:
+It is 2020. Computers are fast enough. `wmctrl` works well enought to control windows from command line.
+
+To flip to the next desktop use:
 
 `x-desktop-rotator --config=/home/alex/.config/config-x-desktop-rotator.json --next`
 
@@ -18,8 +20,7 @@ To flip to previous desktop use:
 
 `x-desktop-rotator --config=/home/alex/.config/config-x-desktop-rotator.json --previous`
 
-
-Add this to openbox rc.xml to start using the x-desktop-rotator
+Add the following to openbox `rc.xml` to start using the `x-desktop-rotator`, replacing `/home/alex/.config-x-desktop-rotator.json` with the location of your configuration file.
 
 ```
     <!--
@@ -43,7 +44,7 @@ Add this to openbox rc.xml to start using the x-desktop-rotator
     </keybind>
 ```
 
-`config-x-desktop-rotator.json` defines coordinates of the monitors containing pinned windows. Here's my setup
+`config-x-desktop-rotator.json` defines coordinates of the monitors containing pinned/sticky windows. Here's my setup:
 
 ```
 [4K-1][4K-2][4K-3]
