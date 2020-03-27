@@ -1,0 +1,120 @@
+# fkill() - kill a process from a ps tree
+
+fkill() {
+
+  local plist
+
+  if [[ "$UID" != "0" ]] ; then
+    plist=$(ps -f -u $UID)
+  else
+    plist=$(ps -ef)
+  fi
+
+  local pid
+  pid=$(echo "$plist" | sed 1d | fzf --prompt="Kill process(es) > " --tac -m | awk '{ print $2}')
+  if [[ "x$pid" != "x" ]] ; then
+    history -s kill $pid
+    kill $pid
+  fi
+}
+
+# fd() - cd to selected directory
+
+fd() {
+
+  local query
+  if [[ ! -z "$@" ]] ; then
+    query="--query=$@"
+  fi
+
+  local dir
+  dir=$(find . -type d -print 2> /dev/null | fzf $query --prompt="Change into directory > ")
+
+  if [[ "x$dir" == "x" || "$dir" == "." ]] ; then
+    echo "No directory below current"
+    return
+  fi
+  history -s cd $dir
+  cd $dir
+}
+
+# ssh to an IP selected from aws-list-ec-instances --region=us-west-2 --table
+
+fssh() {
+  local instline
+  instline=$(aws-list-ec2-instances --region=us-west-2 --table|fzf --header-lines=2 --prompt="SSH into AWS EC2 instance > ")
+  if [[ "x$instline" != "x" ]] ; then
+    local ip
+    ip=$(echo $instline | tr -d ' ' | awk -F '|' '{ print $4 }')
+    if [[ "x$ip" != "x" ]] ; then
+      echo "Ssh'ing into instance below"
+      echo
+      echo "$instline"
+      echo
+      history -s "ssh $ip"
+      ssh $ip
+    else
+      echo "Can't ssh into instance below because it has no external IP address"
+      echo
+      echo "$instline"
+    fi
+  fi
+}
+
+# fe - find file and run an editor
+
+fe() {
+  local file
+  IFS=$'\n' file=($(fzf --prompt="Edit file > " --query="$1" --select-1 --exit-0))
+  if  [[ -n $file ]] ; then
+    local cmd
+    history -s ${EDITOR} $file
+    ${EDITOR} $file
+  fi
+}
+
+# run ack-grep and trigger editing a selected file
+
+vg() {
+  if [[ -z "$@" ]] ; then
+    echo "vg: need a string to look for"
+    return
+  fi
+
+  local file
+  local line
+
+  local txt=$(ack --nobreak --noheading $@ | fzf --prompt="Edit file > " -0 -1 | awk -F':' '{ print $1":"$2}')
+
+  local file=$(echo "$txt"| awk -F':' '{ print $1 }')
+  local line=$(echo "$txt"| awk -F':' '{ print $2 }')
+
+  if [[ -n $file ]] ; then
+    history -s ${EDITOR} +${line} ${file}
+    ${EDITOR} +${line} ${file}
+  fi
+}
+
+# cd into a directory of a file
+
+cdf() {
+  local file
+  local dir
+
+  file=$(fzf --prompt="Change into directory of a file > " --query="$1")
+  if [[ "x$file" == "x" ]]; then
+    echo "No file selected"
+    return
+  fi
+
+  dir=$(dirname "$file")
+  if [[ "$dir" == "." ]] ; then
+    return
+  fi
+  if [[ "x$dir" == "x" ]] ; then
+    echo "Can't extract a directory from $file"
+    return
+  fi
+  history -s cd $dir
+  cd $dir
+}
