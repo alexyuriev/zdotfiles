@@ -5,7 +5,7 @@
 # Extract useful information from aws ec2 describe instances
 # Requires configured aws tool
 #
-# Version 0.0.17
+# Version 0.0.18
 
 use strict;
 use warnings;
@@ -68,7 +68,7 @@ our $cleanup_vars = undef;
               'TOOL_DESC'               => qq(Lists AWS EC2 instances),
               'TOOL_VER_MAJOR'          => 0,
               'TOOL_VER_MINOR'          => 0,
-              'TOOL_VER_PATCH'          => 17,
+              'TOOL_VER_PATCH'          => 18,
 
               'regions'                 => undef,
               'instance_id'             => undef,
@@ -163,7 +163,10 @@ our $cleanup_vars = undef;
     }
 
   Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_ARGUMENT_CONFLICT) if (!Helpers::Misc::isEmpty($config->{'instance_id'}) && !Helpers::Misc::isEmpty($config->{'hostname'}));
-  $opt->{'single_instance'} = 1 if (!Helpers::Misc::isEmpty($config->{'instance_id'}) || !Helpers::Misc::isEmpty($config->{'hostname'}));
+
+  $config->{'single_instance'} = 1 if (!Helpers::Misc::isEmpty($config->{'instance_id'}) || !Helpers::Misc::isEmpty($config->{'hostname'}));
+
+
 
   $opt->{'regions'} = join(qq(,), Helpers::AWS::getAllAWSRegions()) if (Helpers::Misc::isEmpty($config->{'regions'}));
   my @regions = split(',', $opt->{'regions'});
