@@ -5,7 +5,7 @@
 # Extract useful information from aws ec2 describe instances
 # Requires configured aws tool
 #
-# Version 0.0.18
+# Version 0.0.19
 
 use strict;
 use warnings;
@@ -68,7 +68,7 @@ our $cleanup_vars = undef;
               'TOOL_DESC'               => qq(Lists AWS EC2 instances),
               'TOOL_VER_MAJOR'          => 0,
               'TOOL_VER_MINOR'          => 0,
-              'TOOL_VER_PATCH'          => 18,
+              'TOOL_VER_PATCH'          => 19,
 
               'regions'                 => undef,
               'instance_id'             => undef,
@@ -239,6 +239,20 @@ our $cleanup_vars = undef;
               foreach my $v (keys %$t)
                 {
                   $aws_instance->{$v} = $tags->{$t->{$v}} if (!Helpers::Misc::isEmpty($tags->{$t->{$v}}));
+                }
+
+              if (defined $this_instance->{'BlockDeviceMappings'})
+                {
+                  my @disks = ();
+                  foreach my $this_disk (@{$this_instance->{'BlockDeviceMappings'}})
+                    {
+                      my $dev = {
+                                  'DeviceName' => $this_disk->{'DeviceName'},
+                                  'VolumeId'   => $this_disk->{'Ebs'}->{'VolumeId'},
+                                };
+                      push @disks, $dev;
+                    }
+                  $aws_instance->{'Disks'} = \@disks;
                 }
 
               # we actually support only one security group per instance because AWSs permissive model
