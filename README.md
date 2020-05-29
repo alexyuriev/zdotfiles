@@ -2,10 +2,10 @@
 
 Just some useful dotfiles and non-dot files that make life easier
 
-Installation instructions
+### Installation instructions
 
-Edit install.sh and set DSTDIR to wherever you want to install everything into.
-By default it will be installed into zdotfiles of your home directory.
+Edit `install.sh` and set `DSTDIR` to wherever you want to install everything into.
+By default it will be installed into `zdotfiles` of your home directory.
 
 ### Misc configuraiton files
 
