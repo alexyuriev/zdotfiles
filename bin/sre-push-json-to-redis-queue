@@ -1,0 +1,222 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long;
+use FileHandle;
+
+use Helpers::Logger;
+use Helpers::RedisClient;
+use Helpers::Misc;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file %s is missing a node %s);
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file %s is missing field %s in node %s);
+use constant ERR_MSG_FAILED_TO_CREATE_PID_FILE  => qq(Failed to create PID file %s);
+use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter must be a positive integer);
+
+
+our $logger = undef;
+our $cleanup_vars = undef;
+
+{
+  my $opt = {
+              'TOOL_NAME'               => qq(sre-push-json-to-redis-queue),
+              'TOOL_DESC'               => qq(Pushes a JSON to a redis queue),
+              'TOOL_VER_MAJOR'          => 0,
+              'TOOL_VER_MINOR'          => 0,
+              'TOOL_VER_PATCH'          => 1,
+
+              'config'                  => undef,
+              'queue-name'              => undef,
+              'input-file'              => undef,
+
+              '_need-config'            => 1,
+              'sleep-at-exit'           => 0,
+              'pid-file'                => undef,
+              'log-tag'                 => undef,
+              'verbose'                 => 1,
+              'randomize-sleep-at-exit' => 0,
+              'help'                    => 0
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $ret = GetOptions( "config=s"                => \$opt->{'config'},
+                        "queue-name=s"            => \$opt->{'queue-name'},
+                        "input-file=s"            => \$opt->{'input-file'},
+
+                        "log-tag=s"               => \$opt->{'log-tag'},
+                        "pid-file=s"              => \$opt->{'pid-file'},
+                        "verbose"                 => \$opt->{'verbose'},
+                        "sleep-at-exit=s"         => \$opt->{'sleep-at-exit'},
+                        "randomize-sleep-at-exit" => \$opt->{'randomize-sleep-at-exit'},
+                        "help"                    => \$opt->{'help'}
+                  );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $loggerConfig =  {
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, 'syslog' => { 'facility' => 'user' } },
+                      };
+  $loggerConfig->{'ident'} = $opt->{'log-tag'} if (!Helpers::Misc::isEmpty($opt->{'log-tag'}));
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  # handle pid file
+
+  if (!Helpers::Misc::isEmpty($opt->{'pid-file'}))
+    {
+      $logger->log("PID file is %s", $opt->{'pid-file'});
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s exists and only one %s can run at a time", $opt->{'pid-file'}, $opt->{'TOOL_NAME'})  if (Helpers::Misc::is_active_pid_in_file($opt->{'pid-file'}));
+      my $v = undef;
+      ($ret, $v) = Helpers::Misc::writeFile($opt->{'pid-file'}, $$ . "\n", { 'mode' => 0600 });
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_FAILED_TO_CREATE_PID_FILE, $opt->{'pid-file'}, $v) if (!$ret);
+      $cleanup_vars->{'remove_pidfile'} = $opt->{'pid-file'};
+    }
+
+  # handle config file processing. $opt->_need-config establishes if the configuraiton file must be present
+
+  my $config          = undef;
+  my $config_json_ptr = undef;
+
+  if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
+      $config_json_ptr = \qq({});
+    }
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+
+  # finished dealing with a standard config
+
+  foreach my $f (qw/redis/)
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_NODE, $opt->{'config'}, $f) if (Helpers::Misc::isEmpty($config->{$f}));
+    }
+
+  foreach my $f (qw/hostname password db port/)
+    {
+      my $p = 'redis';
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_CONFIG_MISSING_FIELD, $opt->{'config'}, $f, $p) if (Helpers::Misc::isEmpty($config->{$p}->{$f}));
+    }
+
+  foreach my $f (keys %$opt)
+    {
+      $config->{$f} = $opt->{$f} if (defined $opt->{$f});
+    }
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_SLEEP_AT_EXIT_POSITIVE) if (!Helpers::Misc::isUnsignedInteger($opt->{'sleep-at-exit'}));
+  if ($opt->{'sleep-at-exit'} != 0)
+    {
+      my $v = $opt->{'sleep-at-exit'};
+      $v = int(rand($v)) if ($opt->{'randomize-sleep-at-exit'});
+      $cleanup_vars->{'sleep-at-exit'} = $v;
+    }
+
+  my $r = undef;
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Must provide a file name with a JSON to push") if (Helpers::Misc::isEmpty($config->{'input-file'}));
+  ($ret, $r) = isValidQueueName($config->{'queue-name'}); Helpers::Misc::display_and_exit( EXIT_FAILURE, "Must provide a valid queue name") if (!$ret);
+
+  my $redis = undef;
+  ($ret, $redis) = Helpers::RedisClient::getRedisConnection($config->{'redis'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, $redis) if (!$ret);
+
+  ($ret, $r) = Helpers::Misc::readFile_new($config->{'input-file'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Can't open file %s : %s", $config->{'input-file'}, $r) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s is empty", $config->{'input-file'}) if (!defined $r);
+
+  my $json_obj = undef;
+  ($ret, $json_obj) = Helpers::Misc::fromJSON($$r);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s is not a valid JSON: %s", $config->{'input-file'}, $json_obj) if (!$ret);
+
+  my $json_txt = Helpers::Misc::toJSON($json_obj);
+
+  $logger->log("Pushing JSON object '%s' to queue '%s' ...", $json_txt, $opt->{'queue-name'}) if ($opt->{'verbose'});
+
+  my $errmsg = undef;
+  ($ret, $errmsg) = Helpers::RedisClient::lpush($redis, $opt->{'queue-name'} , $json_txt);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to push an element '%s' to queue '%s' : %s", $json_txt, $opt->{'queue-name'}, $errmsg) if (!$ret);
+
+  exit(EXIT_SUCCESS);
+}
+
+exit(EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("  --config=<config.json>         Read configuration from <config.json> file\n");
+  printf("                                 Default: %s\n", $opt->{'config'});
+  printf("  --queue-name=<queuename>       Push JSON file to queue <queuename>.\n");
+  printf("                                 Default: %s\n", $opt->{'queue-name'});
+  printf("  --input-file=<filename>        Read the content to push to the queue from <filename>.\n");
+  printf("                                 Default: %s\n", $opt->{'input-file'});
+  printf("  --sleep-at-exit=<sleep-sec>    Sleep for <sleep-sec> before exiting\n");
+  printf("                                 Default: %s\n", $opt->{'sleep-at-exit'});
+  printf("  --randomize-sleep-at-exit      Randomize sleep at exit delay between its value and 0\n");
+  printf("                                 Default: no\n");
+  printf("  --log-tag=<tag>                Set the logging tag to <tag>\n");
+  printf("                                 Default: %s\n", $opt->{'TOOL_NAME'});
+  printf("  --pid-file=<pidfile.pid>       Store the PID in a file <pidfile.pid>\n");
+  printf("                                 Default: none\n");
+  printf("  --verbose                      Include additional logging\n");
+  printf("                                 Default: No\n");
+  printf("  --help                         This help.\n\n");
+  exit(EXIT_FAILURE);
+}
+
+END {
+  sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
+  unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
+}
+
+sub isValidQueueName {
+  my $qname = shift @_;
+
+  return (0, "NOT OK") if (Helpers::Misc::isEmpty($qname));
+
+  $qname =~ s/^[a-zA-Z0-9_\-\:]*$//g;
+  return (0, "NOT OK") if ($qname ne '');
+  return (1, "OK");
+}
+
+
