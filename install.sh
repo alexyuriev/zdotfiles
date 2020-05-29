@@ -83,6 +83,7 @@ MISCBINS="	batcheck
 			url-2-file
 			extra-non-matching-lines
 			sre-push-to-redis-queue
+			sre-push-json-to-redis-queue
 			sre-sign-debian-package
 			sre-fail-if-bad-redis-hash-key
 			sre-validate-dns-record
