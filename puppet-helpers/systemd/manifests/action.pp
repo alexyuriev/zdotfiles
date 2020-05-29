@@ -1,5 +1,5 @@
 #
-# systemd::action::enable - installs and enables unit file.
+# systemd::action::define_unit - installs and enables unit file.
 #
 #                  $unit_source_dir is a directory where the $name unit file is located
 #                  The source of the unit file is pulled from path ${unit_source_dir}/{$name}.
