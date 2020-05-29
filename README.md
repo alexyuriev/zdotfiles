@@ -1,11 +1,21 @@
 # zdotfiles
 
-Just some useful dotfiles and non-dot files that make life easier
+Some useful configuration files, tools and scripts to make life easier.
 
 ### Installation instructions
 
 Edit `install.sh` and set `DSTDIR` to wherever you want to install everything into.
 By default it will be installed into `zdotfiles` of your home directory.
+
+### Puppet modules
+
+I use puppet to manage everything from real work systems to my laptops, network equipment, etc.
+Over the years I have written some puppet modules that I found to be useful for managing systems. The are located in `puppet-helpers`.
+
+Module                                                        | Description
+--------------------------------------------------------------|------------------------------------------
+[systemd::action](puppet-helpers/systemd/manifests/action.pp) | implements `systemd::action::define_unit`
+
 
 ### Misc configuraiton files
 
