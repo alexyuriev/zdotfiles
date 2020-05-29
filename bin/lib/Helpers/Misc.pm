@@ -12,7 +12,7 @@ use DateTime;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.34";
+  our $VERSION = "0.35";
 }
 
 # readfile() and readfile_new() are functions to slurp content of a file.
@@ -186,7 +186,6 @@ sub isStringOctal
   return 0 if ($str ne '');
   return 1;
 }
-
 
 sub fromJSON
 {
@@ -403,22 +402,36 @@ sub isUnsignedInteger
 {
   my $a = shift @_;
 
-  my $r = 0;
-  if (!isEmpty($a))
-    {
-      $a =~ s/^\+//g;
-      $a =~ s/^-//g;
-
-      $r = 1 if ( $a =~ /^\d+$/g);
-    }
-  return $r;
+  return 0 if (!defined $a);
+  $a =~ s/\d+//g;
+  return 1 if ($a eq '');
+  return 0;
 }
 
-sub isPositiveInteger{
+sub isPositiveInteger
+{
   my $a = shift @_;
 
   return 0 if (!isUnsignedInteger($a));
   return ($a > 0);
+}
+
+sub isInteger
+{
+  my $a = shift @_;
+
+  return 0 if (!defined $a);
+  if ($a =~ m/^\+/)
+    {
+      $a =~ s/^\+//g;
+      return isUnsignedInteger($a);
+    }
+  if ($a =~ m/^\-/)
+    {
+      $a =~ s/^\-//g;
+      return isUnsignedInteger($a);
+    }
+  return isUnsignedInteger($a);
 }
 
 sub collapse_spaces
@@ -529,6 +542,21 @@ sub is_active_pid_in_file {
   return 0 if ($pid < 2 || $pid > $max_pid);
 
   return Helpers::Misc::is_active_pid($pid);
+}
+
+sub isInBetween
+{
+  my $p    = shift @_;
+  my $low  = shift @_;
+  my $high = shift @_;
+
+  return 0 if (!isInteger($p));
+  return 0 if (!isInteger($low));
+  return 0 if (!isInteger($high));
+
+  return 0 if ($p < $low);
+  return 0 if ($p > $high);
+  return 1;
 }
 
 1;
