@@ -1,11 +1,33 @@
 #
-# systemd::action::enable - enables unit file in the multi-user target
+# systemd::action::enable - installs and enables unit file.
 #
 #                  $unit_source_dir is a directory where the $name unit file is located
-#                  $target defines ${target}.wants linkage
-#                  If $start is set to true, then systemd is instucted to start a unit file
-#                  If $target os not set, then $target becomes multi-user.target
+#                  The source of the unit file is pulled from path ${unit_source_dir}/{$name}.
 #
+#                  If $target is defined, then
+#                     1. Directory /etc/systemd/system/${target}.wants is created if does not exist
+#                     2. unit is linked into /etc/systemd/system/${target.wants}
+#                     3. if $start is set to true, the unit is started
+#
+#
+#
+# Typical usage
+#
+#  include "systemd::action"
+#  systemd::action::define_unit  { 'home-playb-lockedroot-proc.mount':
+#                                      unit_source_dir => "${mod_prefix}/wrks2/etc/systemd/system/",
+#                                      target          => "local-fs.target",
+#                                      start           => true,
+#                                }
+#
+#  systemd::action::define_unit  { 'playb-chroot@.service' : unit_source_dir => "${mod_prefix}/wrks2/etc/systemd/system/" }
+#
+#  systemd::action::define_unit  { 'playb-chroot.socket' :
+#                                     unit_source_dir => "${mod_prefix}/wrks2/etc/systemd/system/",
+#                                     target          => "multi-user.target",
+#                                     start           => true,
+#                                }
+
 
 
 define systemd::action::define_unit( String  $unit_source_dir,
