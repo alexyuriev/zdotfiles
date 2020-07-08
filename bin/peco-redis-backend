@@ -4,7 +4,7 @@
 #
 # Backend for single aggregated bash history used by peco
 #
-# version 0.0.1
+# version 0.0.3
 
 use strict;
 use warnings;
@@ -59,7 +59,7 @@ our $cleanup_vars = undef;
               'TOOL_DESC'               => qq(Redis backend for aggregated bash history for peco),
               'TOOL_VER_MAJOR'          => 0,
               'TOOL_VER_MINOR'          => 0,
-              'TOOL_VER_PATCH'          => 1,
+              'TOOL_VER_PATCH'          => 3,
 
               'config'                  => undef,
               'redis-key'               => undef,
@@ -186,6 +186,7 @@ our $cleanup_vars = undef;
 
       ($ret, $v) = Helpers::RedisClient::lpush($redis, $config->{'redis-key'}, $str);
       Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to add command '%s' to redis key '%s': %s",
+                                                    $str,
                                                     $config->{'command'},
                                                     $config->{'redis-key'},
                                                     $v) if (!$ret);
@@ -261,4 +262,3 @@ END {
   sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
   unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
 }
-
