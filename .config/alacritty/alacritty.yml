@@ -1,8 +1,28 @@
 # Configuration for Alacritty, the GPU enhanced terminal emulator.
+# Works with version 0.0.6-dev
+#
+# Main configuraiton:
 
+# Sets ALACRITTY_TERM environment varibale to Xterm
+# Regular decorations, window size 120x30
+# Maximizes the window on a screen
+# Sets font to 8
+#
+# Mouse: middle button         - pastes parimary
+#        Shift + middle button - pastes from clipboard
+#        Right button          - pastes from clipboard
+#
+# Keyboard:
+#
+#        Swallows Ctrl-Alt-Left and Ctrl-Alt-Right ( openbox move desktops )
+#
+#        Ctrl-V, Shift-Ctrl-V paste from clipboard
+#                Shift-Ctrl-C copy  into clipboard
+#
 # Any items in the `env` entry below will be added as
 # environment variables. Some entries may override variables
 # set by alacritty itself.
+
 env:
   # TERM variable
   #
@@ -18,9 +38,9 @@ window:
   #
   # Specified in number of columns/lines, not pixels.
   # If both are `0`, this setting is ignored.
-  dimensions:
-    columns: 120
-    lines: 30
+    dimensions:
+      columns: 120
+      lines: 30
 
   # Window position (changes require restart)
   #
@@ -50,6 +70,9 @@ window:
   # Values for `decorations` (macOS only):
   #     - transparent: Title bar, transparent background and title bar buttons
   #     - buttonless: Title bar, transparent background, but no title bar buttons
+
+  # in tmux-workspace we want no decorations on the main window
+
   decorations: full
 
   # Startup Mode (changes require restart)
@@ -306,7 +329,7 @@ colors:
   #save_to_clipboard: false
 
 # Allow terminal applications to change Alacritty's window title.
-dynamic_title: true
+window.dynamic_title: true
 
 cursor:
   # Cursor style
@@ -434,8 +457,11 @@ shell:
 # And optionally:
 #
 # - `mods` (see key bindings)
-#mouse_bindings:
-#  - { mouse: Middle, action: PasteSelection }
+
+mouse_bindings:
+  - { mouse: Middle, action: PasteSelection     }
+  - { mouse: Middle, mods: Shift, action: Paste }
+  - { mouse: Right,  action: PasteSelection     }
 
 # Key bindings
 #
@@ -547,8 +573,9 @@ key_bindings:
   - { key: Right, mods: Control|Alt, action: None }
 
   # (Windows, Linux, and BSD only)
-  #- { key: V,        mods: Control|Shift, action: Paste            }
-  #- { key: C,        mods: Control|Shift, action: Copy             }
+  - { key: V,        mods: Control,       action: Paste            }
+  - { key: V,        mods: Control|Shift, action: Paste            }
+  - { key: C,        mods: Control|Shift, action: Copy             }
   #- { key: Insert,   mods: Shift,         action: PasteSelection   }
   #- { key: Key0,     mods: Control,       action: ResetFontSize    }
   #- { key: Equals,   mods: Control,       action: IncreaseFontSize }
