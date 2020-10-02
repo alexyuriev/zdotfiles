@@ -5,7 +5,7 @@
 # Saves AWS EC2 tags
 # Requires configured aws tool
 #
-# Version 0.0.3
+# Version 0.0.4
 
 use strict;
 use warnings;
@@ -32,19 +32,30 @@ BEGIN
 
 use Getopt::Long qw(:config no_auto_abbrev);
 use Helpers::AWS;
+use Helpers::Logger;
 use Helpers::Misc;
 
 use constant EXIT_SUCCESS => 0;
 use constant EXIT_FAILURE => 1;
 
-use constant ERR_MSG_MISSING_INSTANCE_ID      => qq(AWS instance ID is missing);
-use constant ERR_MSG_INVALID_REGION           => qq(Must provide a valid AWS EC2 region);
-use constant ERR_MSG_MISSING_AWS_EC2_REGION   => qq(AWS EC2 region name is missing);
-use constant ERR_MSG_INVALID_INSTANCE_ID      => qq(Must provide a valid AWS EC2 instance id);
-use constant ERR_MSG_MISSING_TAG              => qq(Need provide a name of the tag to set);
-use constant ERR_MSG_MISSING_OUTPUT           => qq(Need a name of the file to write tag values);
-use constant ERR_MSG_MODE_NON_OCTAL           => qq(Permissions mode needs to be a octal four or five digit string starting with '0');
-use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to value %s on AWS EC2 instance %s in region %s);
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file %s is missing a node %s);
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file %s is missing field %s in node %s);
+use constant ERR_MSG_FAILED_TO_CREATE_PID_FILE  => qq(Failed to create PID file %s);
+use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter must be a positive integer);
+use constant ERR_MSG_MISSING_INSTANCE_ID        => qq(AWS instance ID is missing);
+use constant ERR_MSG_INVALID_REGION             => qq(Must provide a valid AWS EC2 region);
+use constant ERR_MSG_MISSING_AWS_EC2_REGION     => qq(AWS EC2 region name is missing);
+use constant ERR_MSG_INVALID_INSTANCE_ID        => qq(Must provide a valid AWS EC2 instance id);
+use constant ERR_MSG_MISSING_TAG                => qq(Need provide a name of the tag to set);
+use constant ERR_MSG_MISSING_OUTPUT             => qq(Need a name of the file to write tag values);
+use constant ERR_MSG_MODE_NON_OCTAL             => qq(Permissions mode needs to be a octal four or five digit string starting with '0');
+use constant ERR_MSG_SET_TAG_FAILED             => qq(Failed to set a tag %s to value %s on AWS EC2 instance %s in region %s);
+
+our $logger = undef;
+our $cleanup_vars = undef;
 
 {
 
@@ -53,46 +64,113 @@ use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to va
                 'TOOL_DESC'       => qq(Saves tags from AWS EC2 instance to a file),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 3,
+                'TOOL_VER_PATCH'  => 4,
+
                 'tag'             => undef,
                 'mode'            => 0600,
                 'mode_new'        => undef,
                 'output_file'     => undef,
                 'instance_id'     => undef,
                 'region'          => undef,
-                'help'            => 0,
+
+                '_need-config'            => 0,
+                'config'                  => undef,
+                'single-instance'         => 0,
+                'sleep-at-exit'           => 0,
+                'pid-file'                => undef,
+                'log-tag'                 => undef,
+                'verbose'                 => 1,
+                'randomize-sleep-at-exit' => 0,
+                'help'                    => 0
             };
 
   $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
 
-  my $ret = GetOptions(   "tag=s"             => \$opt->{'tag'},
-                          "region=s"          => \$opt->{'region'},
-                          "instance-id=s"     => \$opt->{'instance_id'},
-                          "mode=s"            => \$opt->{'mode_new'},
-                          "output-file=s"     => \$opt->{'output_file'},
-                          "help"              => \$opt->{'help'}
+
+  my $ret = GetOptions( "tag=s"                   => \$opt->{'tag'},
+                        "region=s"                => \$opt->{'region'},
+                        "instance-id=s"           => \$opt->{'instance_id'},
+                        "mode=s"                  => \$opt->{'mode_new'},
+                        "output-file=s"           => \$opt->{'output_file'},
+
+                        "log-tag=s"               => \$opt->{'log-tag'},
+                        "pid-file=s"              => \$opt->{'pid-file'},
+                        "verbose"                 => \$opt->{'verbose'},
+                        "sleep-at-exit=s"         => \$opt->{'sleep-at-exit'},
+                        "randomize-sleep-at-exit" => \$opt->{'randomize-sleep-at-exit'},
+                        "help"                    => \$opt->{'help'}
                       );
 
   display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
 
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_INSTANCE_ID)     if (Helpers::Misc::isEmpty($opt->{'instance_id'}));
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_INSTANCE_ID)     if (!Helpers::AWS::isValidEC2InstanceId($opt->{'instance_id'}));
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_AWS_EC2_REGION)  if (Helpers::Misc::isEmpty($opt->{'region'}));
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_REGION)          if (!Helpers::AWS::isValidAWSRegion($opt->{'region'}));
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_TAG)             if (Helpers::Misc::isEmpty($opt->{'tag'}));
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_OUTPUT)          if (Helpers::Misc::isEmpty($opt->{'output_file'}));
+  my $loggerConfig =  {
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, 'syslog' => { 'facility' => 'user' } },
+                      };
+  $loggerConfig->{'ident'} = $opt->{'log-tag'} if (!Helpers::Misc::isEmpty($opt->{'log-tag'}));
+  $logger = Helpers::Logger->new($loggerConfig);
 
-  if (defined $opt->{'mode_new'})
+  # handle pid file
+
+  if (!Helpers::Misc::isEmpty($opt->{'pid-file'}))
     {
-      my $len = length($opt->{'mode_new'});
-      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MODE_NON_OCTAL) if (!Helpers::Misc::isStringOctal($opt->{'mode_new'}) || (($len != 4) && ($len != 5)));
-      $opt->{'mode'} = oct($opt->{'mode_new'});
+      $logger->log("PID file is %s", $opt->{'pid-file'});
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s exists and only one %s can run at a time", $opt->{'pid-file'}, $opt->{'TOOL_NAME'})  if (Helpers::Misc::is_active_pid_in_file($opt->{'pid-file'}));
+      my $v = undef;
+      ($ret, $v) = Helpers::Misc::writeFile($opt->{'pid-file'}, $$ . "\n", { 'mode' => 0600 });
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_FAILED_TO_CREATE_PID_FILE, $opt->{'pid-file'}, $v) if (!$ret);
+      $cleanup_vars->{'remove_pidfile'} = $opt->{'pid-file'};
+    }
+
+  my $config          = undef;
+  my $config_json_ptr = undef;
+
+  if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
+      $config_json_ptr = \qq({});
+    }
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+
+  foreach my $f (keys %$opt)
+    {
+      $config->{$f} = $opt->{$f} if (defined $opt->{$f});
+    }
+
+  # finished dealing with a standard config
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_INSTANCE_ID)     if (Helpers::Misc::isEmpty($config->{'instance_id'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_INSTANCE_ID)     if (!Helpers::AWS::isValidEC2InstanceId($config->{'instance_id'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_AWS_EC2_REGION)  if (Helpers::Misc::isEmpty($config->{'region'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_REGION)          if (!Helpers::AWS::isValidAWSRegion($config->{'region'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_TAG)             if (Helpers::Misc::isEmpty($config->{'tag'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_OUTPUT)          if (Helpers::Misc::isEmpty($config->{'output_file'}));
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_SLEEP_AT_EXIT_POSITIVE) if (!Helpers::Misc::isUnsignedInteger($opt->{'sleep-at-exit'}));
+  if ($opt->{'sleep-at-exit'} != 0)
+    {
+      my $v = $opt->{'sleep-at-exit'};
+      $v = int(rand($v)) if ($opt->{'randomize-sleep-at-exit'});
+      $cleanup_vars->{'sleep-at-exit'} = $v;
+    }
+
+  # main tool
+
+  if (defined $config->{'mode_new'})
+    {
+      my $len = length($config->{'mode_new'});
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MODE_NON_OCTAL) if (!Helpers::Misc::isStringOctal($config->{'mode_new'}) || (($len != 4) && ($len != 5)));
+      $opt->{'mode'} = oct($config->{'mode_new'});
     }
 
   my $cmd = sprintf("aws ec2 describe-tags --filter 'Name=resource-id,Values=%s' 'Name=key,Values=%s' --region=%s|",
-                     $opt->{'instance_id'},
-                     $opt->{'tag'},
-                     $opt->{'region'});
+                     $config->{'instance_id'},
+                     $config->{'tag'},
+                     $config->{'region'});
   my $dptr = undef;
   ($ret, $dptr) = Helpers::Misc::readFile($cmd);
   Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to fetch value for tag '%s' from AWS instance '%s' in region '%s'") if (!$ret);
@@ -110,16 +188,23 @@ use constant ERR_MSG_SET_TAG_FAILED           => qq(Failed to set a tag %s to va
       $value = $this_tag->{'Value'};
       last;
     }
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Can't find a tag '%s' assigned to AWS EC2 instance '%s' in region '%s'", $opt->{'tag'}, $opt->{'instance_id'}, $opt->{'region'}) if (!defined $value);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Can't find a tag '%s' assigned to AWS EC2 instance '%s' in region '%s'",
+                                                  $config->{'tag'},
+                                                  $config->{'instance_id'},
+                                                  $config->{'region'}) if (!defined $value);
   $value =~ s/,/\n/g; $value .= "\n";
   my $fname = $opt->{'output_file'} . "." . $$;
   my $r = undef;
-  ($ret, $r) = Helpers::Misc::writeFile($fname, $value, { 'mode' => $opt->{'mode'}});
+  ($ret, $r) = Helpers::Misc::writeFile($fname, $value, { 'mode' => $config->{'mode'}});
   Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to write tag value into a temporary file %s: %s", $fname, $r) if (!$ret);
 
   $ret = rename $fname, $opt->{'output_file'};
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to rename temporary file %s to output file %s", $fname, $opt->{'output_file'}) if (!$ret);
-  Helpers::Misc::display_and_exit( EXIT_SUCCESS, "Wrote value of '%s' tag of AWS EC2 instance '%s' in region '%s' to '%s'", $opt->{'tag'}, $opt->{'instance_id'}, $opt->{'region'}, $opt->{'output_file'});
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to rename temporary file %s to output file %s", $fname, $config->{'output_file'}) if (!$ret);
+  Helpers::Misc::display_and_exit( EXIT_SUCCESS, "Wrote value of '%s' tag of AWS EC2 instance '%s' in region '%s' to '%s'",
+                                                  $config->{'tag'},
+                                                  $config->{'instance_id'},
+                                                  $config->{'region'},
+                                                  $config->{'output_file'});
 }
 
 exit(EXIT_FAILURE);
@@ -132,19 +217,34 @@ sub display_help_and_exit
 
   printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
   printf("Options:\n\n");
-  printf("      --instance-id=<id>         Get tag on AWS instance id <id>\n");
+  printf("  --instance-id=<id>             Get tag on AWS instance id <id>\n");
   printf("                                 Default: %s\n", $opt->{'instance_id'});
-  printf("      --region=<region>          Get tag on AWS instance in region <region>\n");
+  printf("  --region=<region>              Get tag on AWS instance in region <region>\n");
   printf("                                 Default: %s\n", $opt->{'region'});
-  printf("      --tag=<tag>                Get tag <tag>\n");
+  printf("  --tag=<tag>                    Get tag <tag>\n");
   printf("                                 Default: %s\n", $opt->{'tag'});
-  printf("      --output-file=<filename>   Write tag value into file <filename>\n");
+  printf("  --output-file=<filename>       Write tag value into file <filename>\n");
   printf("                                 Default: %s\n", $opt->{'output_file'});
-  printf("      --mode=<mode>              Set output <filename> permissions to <mode>\n");
+  printf("  --mode=<mode>                  Set output <filename> permissions to <mode>\n");
   printf("                                 Default: %s\n", $opt->{'mode'});
-  printf("      --help                     This help\n\n");
+  printf("  --sleep-at-exit=<sleep-sec>    Sleep for <sleep-sec> before exiting\n");
+  printf("                                 Default: %s\n", $opt->{'sleep-at-exit'});
+  printf("  --randomize-sleep-at-exit      Randomize sleep at exit delay between its value and 0\n");
+  printf("                                 Default: no\n");
+  printf("  --log-tag=<tag>                Set the logging tag to <tag>\n");
+  printf("                                 Default: %s\n", $opt->{'TOOL_NAME'});
+  printf("  --pid-file=<pidfile.pid>       Store the PID in a file <pidfile.pid>\n");
+  printf("                                 Default: none\n");
+  printf("  --verbose                      Include additional logging\n");
+  printf("                                 Default: No\n");
+  printf("  --help                         This help.\n\n");
   printf("This tool relies on pre-configured aws utility\n\n");
 
   exit(EXIT_SUCCESS);
 
+}
+
+END {
+  sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
+  unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
 }
