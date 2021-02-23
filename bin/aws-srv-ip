@@ -8,10 +8,10 @@ if [[ -z "$1" ]]; then
 fi
 
 srv_name=$1
-region=${DEFAULT_REGION}
+region=$2
 
-if [ ! -z ${AWS_DEF_REGION} ]; then
-	region=${AWS_DEF_REGION}
+if [[ -z "$2" ]]; then
+	region=${DEFAULT_REGION}
 fi
 
 instance_ip=$(aws-list-ec2-instances --region=$region --hostname=$srv_name | jq '.PublicIp' | tr -d '"')
