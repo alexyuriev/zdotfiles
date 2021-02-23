@@ -5,7 +5,7 @@
 # Launches instance from the AMI
 # Requires configured aws tool
 #
-# Version 0.0.7
+# Version 0.0.8
 
 use strict;
 use warnings;
@@ -65,7 +65,7 @@ our $logger = undef;
                 'TOOL_DESC'               => qq(Builds and lauches EC2 instance from AMI),
                 'TOOL_VER_MAJOR'          => 0,
                 'TOOL_VER_MINOR'          => 0,
-                'TOOL_VER_PATCH'          => 7,
+                'TOOL_VER_PATCH'          => 8,
                 'config'                  => undef,
                 'ami_id'                  => undef,
                 'instance_type'           => undef,
@@ -189,7 +189,10 @@ our $logger = undef;
   $cmd .= qq( --placement AvailabilityZone=) . $config->{'zone'} if (!Helpers::Misc::isEmpty($config->{'zone'}));
   $cmd .= qq( --user-data $user_data_base64 |) if ($config->{'sec_fencer_build'});
 
-  $logger->log_no_stdout("Building and running a new instance with type %s with hostname %s", $config->{'instance_type'}, $opt->{'hostname'}) if ($opt->{'verbose'});
+  $logger->log_no_stdout( "Building and running a new instance with type %s with hostname %s using command `%s`",
+                          $config->{'instance_type'},
+                          $opt->{'hostname'},
+                          $cmd) if ($opt->{'verbose'});
 
   my $response_ptr = undef;
   ($ret, $response_ptr) = Helpers::Misc::readFile($cmd);
@@ -246,6 +249,8 @@ sub display_help_and_exit
   printf("                                      Default: %s\n", $opt->{'hostname'});
   printf("      --instance-type=<type>          Launch instance type <type>\n");
   printf("                                      Default: %s\n", $opt->{'instance_type'});
+  printf("      --security-group=<group-id>     Launch instance with security group <group-id>\n");
+  printf("                                      Default: %s\n", $opt->{'security_group'});
   printf("      --zone=<zone>                   Launch instance in availability zone <zone>\n");
   printf("                                      Default: let AWS EC2 decide\n");
   printf("      --sec-fencer-build              This is a build for an instance using Security Fencer\n");
