@@ -1,0 +1,546 @@
+#!/usr/bin/perl
+
+# aws-lambda-deploy-function
+#
+# Deploys and publishes a lambda function
+# Requires configured aws tool
+#
+# Version 0.0.1
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use File::Path;
+
+use Helpers::Logger;
+use Helpers::Misc;
+use Helpers::AWS;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_FAILED_TO_CREATE_PID_FILE  => qq(Failed to create PID file %s);
+use constant ERR_MSG_SLEEP_AT_EXIT_POSITIVE     => qq(Sleep-at-exit parameter must be a positive integer);
+use constant ERR_MSG_MISSING_CONFIG             => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_EMPTY_CONFIG               => qq(Configuration file %s seems to be empty);
+use constant ERR_MSG_CONFIG_NOT_JSON            => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_CONFIG_MISSING_NODE        => qq(Configuration file %s is missing a node '%s');
+use constant ERR_MSG_CONFIG_MISSING_FIELD       => qq(Configuration file %s is missing field '%s' in node '%s');
+
+use constant ERR_MSG_INVALID_REGION                     => qq(Must provide a valid AWS region);
+use constant ERR_MSG_MISSING_REGION                     => qq(AWS region must be provided);
+use constant ERR_MSG_INVALID_FUNCTION_ARN               => qq(Must provide a valid AWS Lambda fucntion ARN);
+use constant ERR_MSG_MISSING_FUNCTION_ARN               => qq(AWS Lambda function ARN must be provided);
+use constant ERR_MSG_MISSING_FUNCTION_FILE              => qq(Must provide a file name for the AWS Lambda single file function deploy);
+use constant ERR_MSG_MISSING_MAX_CF_RETRIES             => qq(Must provide the maximum number of retries to check Cloud Front distribution post update);
+use constant ERR_MSG_MISSING_RETRY_DELAY                => qq(Must provide the delay between retries for Cloud Front distribution check);
+use constant ERR_MSG_MISSING_LAMBDA_FUNCTION_FILENAME   => qq(Lambda function file name must be provided);
+
+our $logger = undef;
+our $cleanup_vars = undef;
+
+our @cleanup_files = ();
+
+{
+  my $opt = {
+                'TOOL_NAME'       => qq(aws-lambda-deploy-function),
+                'TOOL_DESC'       => qq(Deploys and activates a lambda function),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 1,
+
+                'region'                    => undef,
+                'stdout-json'               => 0,
+                'source-function-file'      => undef,
+                'lambda-function-file-name' => undef,
+                'lambda-arn'                => undef,
+                'region'                    => undef,
+                'cloudfront-id'             => undef,
+                'max-cf-retries'            => 100,
+                'cf-retry-delay'            => 20,
+                'tmpdir'                    => "/tmp",
+
+                '_need-config'            => 0,
+                'sleep-at-exit'           => 0,
+                'pid-file'                => undef,
+                'log-tag'                 => undef,
+                'verbose'                 => 1,
+                'randomize-sleep-at-exit' => 0,
+                'help'                    => 0
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $ret = GetOptions(   "region=s"                    => \$opt->{'region'},
+                          "stdout-json"                 => \$opt->{'stdout-json'},
+                          "source-function-file=s"      => \$opt->{'source-function-file'},
+                          "lambda-function-file-name=s" => \$opt->{'lambda-function-file-name'},
+                          "update-cloudfront-id=s"      => \$opt->{'cloudfront-id'},
+                          "lambda-arn=s"                => \$opt->{'lambda-arn'},
+                          "region=s"                    => \$opt->{'region'},
+                          "tmpdir=s"                    => \$opt->{'tmpdir'},
+                          "max-cf-retries=s"            => \$opt->{'max-cf-retries'},
+                          "cf-retry-delay=s"            => \$opt->{'cf-retry-delay'},
+
+                          "log-tag=s"               => \$opt->{'log-tag'},
+                          "pid-file=s"              => \$opt->{'pid-file'},
+                          "verbose"                 => \$opt->{'verbose'},
+                          "sleep-at-exit=s"         => \$opt->{'sleep-at-exit'},
+                          "randomize-sleep-at-exit" => \$opt->{'randomize-sleep-at-exit'},
+                          "help"                    => \$opt->{'help'}
+                  );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+
+  my $loggerConfig =  {
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, 'syslog' => { 'facility' => 'user' } },
+                      };
+  $loggerConfig->{'ident'} = $opt->{'log-tag'} if (!Helpers::Misc::isEmpty($opt->{'log-tag'}));
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  # handle pid file
+
+  if (!Helpers::Misc::isEmpty($opt->{'pid-file'}))
+    {
+      $logger->log("PID file is %s", $opt->{'pid-file'});
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s exists and only one %s can run at a time", $opt->{'pid-file'}, $opt->{'TOOL_NAME'})  if (Helpers::Misc::is_active_pid_in_file($opt->{'pid-file'}));
+      my $v = undef;
+      ($ret, $v) = Helpers::Misc::writeFile($opt->{'pid-file'}, $$ . "\n", { 'mode' => 0600 });
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_FAILED_TO_CREATE_PID_FILE, $opt->{'pid-file'}, $v) if (!$ret);
+      $cleanup_vars->{'remove_pidfile'} = $opt->{'pid-file'};
+    }
+
+  # handle config file processing. $opt->_need-config establishes if the configuraiton file must be present
+
+  my $config          = undef;
+  my $config_json_ptr = undef;
+
+  if (Helpers::Misc::isEmpty($opt->{'config'})) { $opt->{'config'} = $opt->{'default_config'}; } else { $opt->{'_need-config'} = 1; }
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'_need-config'});
+      $config_json_ptr = \qq({});
+    }
+  ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+
+  use Data::Dumper;
+
+  # finished dealing with a standard config
+
+  foreach my $f (keys %$opt)
+    {
+      $config->{$f} = $opt->{$f} if (defined $opt->{$f});
+    }
+
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_MISSING_REGION)                   if (Helpers::Misc::isEmpty($config->{'region'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_INVALID_REGION)                   if (!Helpers::AWS::isValidAWSRegion($config->{'region'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_MISSING_FUNCTION_ARN)             if (!Helpers::AWS::isValidAWSLambdaArn($config->{'lambda-arn'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_MISSING_FUNCTION_FILE)            if (Helpers::Misc::isEmpty($config->{'source-function-file'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_MISSING_LAMBDA_FUNCTION_FILENAME) if (Helpers::Misc::isEmpty($config->{'lambda-function-file-name'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_MISSING_MAX_CF_RETRIES)           if (!Helpers::Misc::isPositiveInteger($config->{'max-cf-retries'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_MISSING_RETRY_DELAY)              if (!Helpers::Misc::isPositiveInteger($config->{'cf-retry-delay'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MSG_SLEEP_AT_EXIT_POSITIVE)           if (!Helpers::Misc::isUnsignedInteger($opt->{'sleep-at-exit'}));
+
+  # read lambda
+
+  my $dptr = undef;
+  ($ret, $dptr) = Helpers::Misc::readFile_new($config->{'source-function-file'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to read AWS lambda single file function from %s : %s",
+                                                $config->{'source-function-file'},
+                                                $dptr) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s is empty", $config->{'source-function-file'}) if (!defined $dptr);
+
+  my $lambda_txt = $$dptr;
+
+  # create temp directory
+
+  my $this_tmpdir = sprintf("%s/%s.%s", $config->{'tmpdir'}, $config->{'TOOL_NAME'}, $$);
+  if (! -d $this_tmpdir)
+    {
+      $logger->log("Temporary directory %s does not exist, creating", $this_tmpdir);
+      File::Path::make_path($this_tmpdir, {'verbose' => 0,'mode' => 0700, 'error' => \$ret });
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to create a temporary directory %s.", $this_tmpdir) if (scalar @$ret != 0);
+    }
+
+  # create a zip file
+
+  my $tmp_zip_filename = $this_tmpdir . "/lambda-function.zip";
+
+  my $cmd = sprintf("| zip %s - ", $tmp_zip_filename);
+
+  # printf("Creating zip file using command cmd = $cmd\n");
+
+  my $err = undef;
+  ($ret, $err) = Helpers::Misc::writeFile($cmd, $lambda_txt, { mode => 0700 });
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to create a zip file %s : %s", $tmp_zip_filename, $err) if (!$ret);
+
+  # rename - (stdin) inside the zip to what we want it to be known inside lambda.
+  # zip does not support doin git a different way
+
+  $cmd = "\@ -\n\@=" . $config->{'lambda-function-file-name'};
+
+  ($ret, $err) = Helpers::Misc::writeFile("| zipnote -w " . $tmp_zip_filename, $cmd);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to rename a source file %s to lambda file %s inside the payload function payload archive %s",
+                                                $config->{'source-function-file'},
+                                                $config->{'lambda-function-file-name'},
+                                                $tmp_zip_filename) if (!$ret);
+
+  $cmd  = "aws lambda update-function-code";
+  $cmd .= " --region="            . $config->{'region'};
+  $cmd .= " --function-name="     . $config->{'lambda-arn'};
+  $cmd .= " --zip-file fileb://"  . $tmp_zip_filename;
+  $cmd .= " | ";
+
+  ($ret, $dptr) = Helpers::Misc::readFile_new($cmd);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to update AWS Lambda function %s from file %s : %s", $config->{'lambda-arn'}, $tmp_zip_filename, $dptr) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Update of AWS Lambda funciton %s from file %s returned an empty blob", $config->{'lambda-arn'}, $tmp_zip_filename) if (!defined $dptr);
+
+  my $json_obj = undef;
+
+  ($ret, $json_obj) = Helpers::Misc::fromJSON($$dptr);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Result of an update to AWS Lambda function %s from file %s is not a JSON: %s",
+                                                $config->{'lambda-arn'}, $tmp_zip_filename, $json_obj) if (!$ret);
+
+  # {
+  #     "FunctionName": "api-dev-CORS",
+  #     "FunctionArn": "arn:aws:lambda:us-east-1:<>",
+  #     "Runtime": "nodejs12.x",
+  #     "Role": "arn:aws:iam::<>",
+  #     "Handler": "index.handler",
+  #     "CodeSize": 1237,
+  #     "Description": "",
+  #     "Timeout": 3,
+  #     "MemorySize": 128,
+  #     "LastModified": "2021-05-05T14:30:51.495+0000",
+  #     "CodeSha256": "hSgAk/HzDBpHg1pzMBZbuv7YXxSI+3qWhEfGcDdvX1M=",
+  #     "Version": "$LATEST",
+  #     "TracingConfig": {
+  #         "Mode": "PassThrough"
+  #     },
+  #     "RevisionId": "8007aca6-9286-4461-8aef-513bd44d58d8",
+  #     "State": "Active",
+  #     "LastUpdateStatus": "Successful"
+  # }
+
+  foreach my $f ( qw/FunctionName FunctionArn Role Version RevisionId State/)
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Result of an update to AWS Lambda function %s from file %s is missing a mandatory field %s",
+                                                    $config->{'lambda-arn'},
+                                                    $tmp_zip_filename,
+                                                    $f,
+                                                    $json_obj) if (Helpers::Misc::isEmpty($json_obj->{$f}));
+    }
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Result of an update to AWS Lambda function %s from file %s is '%s' instead of 'Successful'",
+                                                $config->{'lambda-arn'},
+                                                $tmp_zip_filename,
+                                                $json_obj->{'LastUpdateStatus'}) if ($json_obj->{'LastUpdateStatus'} ne "Successful");
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Post update the AWS Lambda function %s from file %s state is '%s' and not 'Active'",
+                                                $config->{'lambda-arn'},
+                                                $tmp_zip_filename,
+                                                $json_obj->{'LastUpdateStatus'}) if ($json_obj->{'State'} ne "Active");
+
+  $logger->log("Will publish AWS Lambda function %s revision id %s in region %s",
+                $config->{'lambda-arn'},
+                $json_obj->{'RevisionId'},
+                $config->{'region'});
+
+  $cmd  = "aws lambda publish-version ";
+  $cmd .= " --region "        . $config->{'region'};
+  $cmd .= " --function-name " . $config->{'lambda-arn'};
+  $cmd .= " --revision-id "   . $json_obj->{'RevisionId'};
+  $cmd .= " | ";
+
+  ($ret, $dptr) = Helpers::Misc::readFile_new($cmd);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to publish AWS Lambda function %s revision %s: %s",
+                                                $config->{'lambda-arn'},
+                                                $json_obj->{'RevisionId'},
+                                                $dptr) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Publishing of AWS Lambda function %s revision %s returned an empty blob",
+                                                $config->{'lambda-arn'},
+                                                $json_obj->{'RevisionId'}) if (!defined $dptr);
+
+  my $lambda_obj = undef;
+
+  ($ret, $lambda_obj) = Helpers::Misc::fromJSON($$dptr);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Result of publishing AWS Lambda function %s revision %s is not a JSON: %s",
+                                                $config->{'lambda-arn'},
+                                                $json_obj->{'RevisionId'},
+                                                $lambda_obj) if (!$ret);
+
+  foreach my $f ( qw/FunctionName FunctionArn Role Version RevisionId State/)
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Result of a publish to AWS Lambda function %s revision %s is missing a mandatory field %s",
+                                                    $config->{'lambda-arn'},
+                                                    $json_obj->{'RevisionId'},
+                                                    $f,
+                                                    $json_obj) if (Helpers::Misc::isEmpty($json_obj->{$f}));
+    }
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Result of a publish to AWS Lambda function %s revision %s is '%s' instead of 'Successful'",
+                                                $config->{'lambda-arn'},
+                                                $json_obj->{'RevisionId'},
+                                                $json_obj->{'LastUpdateStatus'}) if ($json_obj->{'LastUpdateStatus'} ne "Successful");
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Post of a publish to AWS Lambda function %s revision %s state is '%s' and not 'Active'",
+                                                $config->{'lambda-arn'},
+                                                $json_obj->{'RevisionId'},
+                                                $json_obj->{'LastUpdateStatus'}) if ($json_obj->{'State'} ne "Active");
+
+
+  my $json_txt = undef;
+  ($ret, $json_txt) = Helpers::Misc::toJSON($lambda_obj, { canonical => 1, pretty => 1 });
+  # printf("result: \n%s\n", $json_txt);
+
+  $logger->log("New function version is %s. ARN %s", $lambda_obj->{'Version'}, $lambda_obj->{'FunctionArn'});
+  exit(EXIT_SUCCESS) if (Helpers::Misc::isEmpty($config->{'cloudfront-id'}));
+
+  $logger->log("Requested to update active Lambda\@Edge function for Cloudfront distribution %s", $config->{'cloudfront-id'});
+  $logger->log("Fetching the current configuratin for Cloudfront distribution %s", $config->{'cloudfront-id'});
+
+  $cmd  = "aws cloudfront get-distribution-config";
+  $cmd .= " --id " . $config->{'cloudfront-id'};
+  $cmd .= " --output json";
+  $cmd .= " | ";
+
+  ($ret, $dptr) = Helpers::Misc::readFile_new($cmd);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to get current configuration for CloudFront distribution %s : %s",
+                                                $config->{'cloudfront-id'},
+                                                $dptr) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Getting current configuration for CloudFront distribution %s returned an empty blob",
+                                                $config->{'cloudfront-id'}) if (!defined $dptr);
+
+  my $cf_obj = undef;
+
+  ($ret, $cf_obj) = Helpers::Misc::fromJSON($$dptr);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Result of getting current configuration from CloudFront distribution %s is not a JSON: %s",
+                                                $config->{'cloudfront-id'},
+                                                $cf_obj) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Current configuration of CloudFront distribution %s is missing an ETag field",
+                                                $config->{'cloudfront-id'}) if (Helpers::Misc::isEmpty($cf_obj->{'ETag'}));
+
+  my $etag = $cf_obj->{'ETag'}; # AWS CF needs Etag for update
+  delete $cf_obj->{'ETag'};     # AWS CF configuration cannot contain ETag element on a top
+
+  ($ret, $json_txt) = Helpers::Misc::toJSON($cf_obj->{'DistributionConfig'}, { canonical => 1, pretty => 1 });
+
+  my $cf_original_config_name = $this_tmpdir . "/cf-original-" . $config->{'cloudfront-id'} . ".json";
+  $logger->log("Writing original CloudFront distribution configuration to file %s", $cf_original_config_name);
+
+  ($ret, $err) = Helpers::Misc::writeFile($cf_original_config_name, $json_txt);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to write original CloudFront configuration into file %s: %s", $cf_original_config_name, $err) if (!$ret);
+
+  push @cleanup_files, $cf_original_config_name;
+
+  #
+  # If there's a string like in the Cloud Front active configuration
+  #
+  # "LambdaFunctionARN": "arn:aws:lambda:us-east-1:813255264114:function:api-dev-CORS:4"
+  #                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ |
+  #                        |                                                          |
+  #                        v                                                          |
+  #     is the Lambda function ARN less the version                                   |
+  #                                                                                   |
+  #     is the Lambda function version  <---------------------------------------------+
+  #
+  # replace it with the new version.
+
+  my $match_function         = $config->{'lambda-arn'};
+  my $match_function_version =  $match_function . qq(:\\d+);
+  my $match_function_prefix  = qq(\\h+"LambdaFunctionARN"\\h+:\\h+");
+  my $match_function_suffix  = qq(");
+
+  my $match_pattern = $match_function_prefix . $match_function_version . $match_function_suffix;
+
+  # printf("Match pattern = \n%s\n", $match_pattern);
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Current CloudFront configuration does not have '%s' specified as LambdaFunctionARN",
+                                                $config->{'lambda-arn'}) if ( ! $json_txt =~ m/$match_pattern/);
+
+  my $new_function = $match_function . ":" . $lambda_obj->{'Version'};
+  $json_txt =~ s/$match_pattern/ "LambdaFunctionARN" : "$new_function"/g;
+
+  my $cf_config_name = $this_tmpdir . "/cf-" . $config->{'cloudfront-id'} . ".json";
+  $logger->log("Writing new CloudFront configuration to file %s. Distribution Etag: %s", $cf_config_name, $etag);
+
+  ($ret, $err) = Helpers::Misc::writeFile($cf_config_name, $json_txt);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to write new CloudFront configuration into file %s: %s", $cf_config_name, $err) if (!$ret);
+
+  push @cleanup_files, $cf_config_name;
+
+  # push out updated distribution config
+
+  $cmd  = 'aws cloudfront update-distribution';
+  $cmd .= ' --id=' . $config->{'cloudfront-id'};
+  $cmd .= ' --distribution-config="file://' . $cf_config_name . '"';
+  $cmd .= ' --if-match=' . $etag;
+  $cmd .= ' | ';
+
+  ($ret, $dptr) = Helpers::Misc::readFile_new($cmd);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to update Cloud Front distribution %s with the new Lambda\@Edge fucntion %s: %s",
+                                                $config->{'cloudfront-id'},
+                                                $new_function,
+                                                $dptr) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "AWS API returned an empty document when updating Cloud Front distribution %s with the new Lambda\@Edge fucntion %s",
+                                                $config->{'cloudfront-id'},
+                                                $new_function) if (!defined $dptr);
+
+  my $resp_obj = undef;
+  ($ret, $resp_obj) = Helpers::Misc::fromJSON($$dptr);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "AWS API returned an invalid JSON while updating Cloud Front distribution %s with the new Lambda\@Edge fucntion %s: %s",
+                                                $config->{'cloudfront-id'},
+                                                $new_function,
+                                                $resp_obj) if (!$ret);
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Received an invalid status '%s' from AWS while updating Cloud Front distribution %s with the new Lambda\@Edge fucntion %s",
+                                                $resp_obj->{'Distribution'}->{'Status'},
+                                                $config->{'cloudfront-id'},
+                                                $new_function) if (     $resp_obj->{'Distribution'}->{'Status'} ne "InProgress"
+                                                                    &&  $resp_obj->{'Distribution'}->{'Status'} ne "Deployed");
+
+  $cmd  = 'aws cloudfront get-distribution';
+  $cmd .= ' --id=' . $config->{'cloudfront-id'};
+  $cmd .= ' | ';
+
+  for( my $this_retry = 1; $this_retry <= $config->{'max-cf-retries'}; $this_retry++)
+    {
+      last if ($resp_obj->{'Distribution'}->{'Status'} eq "Deployed");
+      $logger->log( "Cloud Front distribution '%s' status is '%s' instead of 'Deployed'. Performing retry %s of %s",
+                    $config->{'cloudfront-id'},
+                    $resp_obj->{'Distribution'}->{'Status'},
+                    $this_retry,
+                    $config->{'max-cf-retries'});
+
+      sleep($config->{'cf-retry-delay'});
+
+      ($ret, $dptr) = Helpers::Misc::readFile_new($cmd);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to get status of a Cloud Front distribution %s post the new Lambda\@Edge function %s update: %s",
+                                                    $config->{'cloudfront-id'},
+                                                    $new_function,
+                                                    $dptr) if (!$ret);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "AWS API returned an empty document while getting status of Cloud Front distribution %s with the new Lambda\@Edge fucntion %s",
+                                                    $config->{'cloudfront-id'},
+                                                    $new_function) if (!defined $dptr);
+
+      ($ret, $resp_obj) = Helpers::Misc::fromJSON($$dptr);
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "AWS API returned an invalid JSON while getting status of Cloud Front distribution %s with the new Lambda\@Edge fucntion %s: %s",
+                                                    $config->{'cloudfront-id'},
+                                                    $new_function,
+                                                    $resp_obj) if (!$ret);
+    }
+  $logger->log("Successfully deployed Lambda\@Edge function %s to cloud front distribution %s. Running cleanup", $new_function, $config->{'cloudfront-id'});
+
+  {
+    my $t = { 0 => "failure", 1 => "success" };
+
+    my $delete_failed = 0;
+    foreach my $this_file (@cleanup_files)
+      {
+        $ret = unlink($this_file);
+        if (!$delete_failed)
+          {
+            $delete_failed = 1 if ($ret != 1);
+          }
+        $logger->log("Deleting temporary file %s... %s", $this_file, $t->{$ret});
+      }
+    Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to remove temporary files from directory %s", $this_tmpdir) if ($delete_failed);
+    $ret = rmdir($this_tmpdir);
+    Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to remove temporary directory %s", $this_tmpdir) if (!$ret);
+  }
+  Helpers::Misc::display_and_exit(EXIT_SUCCESS, "Deployment of updated Lambda\@Edge function %s to Cloud Front distribution %s has been completed successfully",
+                                                $new_function,
+                                                $config->{'cloudfront-id'});
+
+  exit(EXIT_FAILURE);
+}
+
+exit(EXIT_FAILURE);
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("  --region=<region>                         List instances from AWS EC2 region <region>\n");
+  printf("                                            Default: %s\n", $opt->{'region'});
+  printf("  --source-function-file=<src>              Use content of <src> as the single Lambda function\n");
+  printf("                                            Default: %s\n", $opt->{'source-function-file'});
+  printf("  --lambda-function-file-name=<lambda-file> Set the name of the single lambda function file to <lambda-file>\n");
+  printf("                                            Default: %s\n", $opt->{'lambda-function-file-name'});
+  printf("  --update-cloudfront-id=<cf-id>            Update CloudFront distribution <cf-id> with the new lamba function\n");
+  printf("                                            Default: do not update\n");
+  printf("  --max-cf-retries=<max-retries>            Maximum number of attempts to check if CloudFront distributionn has\n");
+  printf("                                            been successfully updated with the Lambda\@Edge function\n");
+  printf("                                            Default: %s\n", $opt->{'max-cf-retries'});
+  printf("  --cf-retry-delay=<delayseconds>           Delay <delayseconds> between the re-checks of CloudFront distribution update\n");
+  printf("                                            Default: %s\n", $opt->{'cf-retry-delay'});
+  printf("  --sleep-at-exit=<sleep-sec>               Sleep for <sleep-sec> before exiting\n");
+  printf("                                            Default: %s\n", $opt->{'sleep-at-exit'});
+  printf("  --randomize-sleep-at-exit                 Randomize sleep at exit delay between its value and 0\n");
+  printf("                                            Default: no\n");
+  printf("  --log-tag=<tag>                           Set the logging tag to <tag>\n");
+  printf("                                            Default: %s\n", $opt->{'TOOL_NAME'});
+  printf("  --pid-file=<pidfile.pid>                  Store the PID in a file <pidfile.pid>\n");
+  printf("                                            Default: none\n");
+  printf("  --verbose                                 Include additional logging\n");
+  printf("                                            Default: No\n");
+  printf("  --help                                    This help.\n\n");
+
+  exit(EXIT_FAILURE);
+}
+
+END {
+  sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
+  unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
+}
+
+sub result_as_table
+{
+  my $amis_ptr = shift @_;
+
+  my $result = '';
+
+  my $row_format = "%3s| %-21s | %-33s | %-2s | %-16s | %-7s | %-21s\n";
+  $result .= sprintf("\n");
+  $result .= sprintf($row_format, '', "AMI ID", "AMI Name", "Sz", "Date", "Access", "Snapshot");
+  $result .= sprintf("-------------------------------------------------------------------------------------------------------------------------\n");
+
+  my $i = 0;
+  foreach my $ami (@$amis_ptr)
+    {
+      $i++;
+      $result .= sprintf($row_format, $i, $ami->{'ami-id'}, $ami->{'name'}, $ami->{'size'}, substr($ami->{'created'}, 0, 16), $ami->{'access'}, $ami->{'snapshot'});
+    }
+  return $result;
+}
+
