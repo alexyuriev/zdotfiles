@@ -5,7 +5,7 @@
 # Deploys and publishes a lambda function
 # Requires configured aws tool
 #
-# Version 0.0.1
+# Version 0.0.2
 
 use strict;
 use warnings;
@@ -65,10 +65,10 @@ our @cleanup_files = ();
 {
   my $opt = {
                 'TOOL_NAME'       => qq(aws-lambda-deploy-function),
-                'TOOL_DESC'       => qq(Deploys and activates a lambda function),
+                'TOOL_DESC'       => qq(Deploys and activates a Lambda function),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 1,
+                'TOOL_VER_PATCH'  => 2,
 
                 'region'                    => undef,
                 'stdout-json'               => 0,
@@ -199,6 +199,8 @@ our @cleanup_files = ();
   my $err = undef;
   ($ret, $err) = Helpers::Misc::writeFile($cmd, $lambda_txt, { mode => 0700 });
   Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to create a zip file %s : %s", $tmp_zip_filename, $err) if (!$ret);
+
+  push @cleanup_files, $tmp_zip_filename;
 
   # rename - (stdin) inside the zip to what we want it to be known inside lambda.
   # zip does not support doin git a different way
