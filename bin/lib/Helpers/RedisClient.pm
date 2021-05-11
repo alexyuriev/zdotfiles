@@ -3,7 +3,7 @@ use strict;
 use warnings;
 
 BEGIN {
-  our $VERSION = "0.22";
+  our $VERSION = "0.23";
 }
 
 use strict;
@@ -642,11 +642,29 @@ sub expire {
   my $key   = shift @_;
   my $ttl   = shift @_;
 
+  return (0, "unknown redis")      if (!defined $redis);
+  return (0, "bad or missing key") if (Helpers::Misc::isEmpty($key));
+  return (0, "bad ttl")            if (!Helpers::Misc::isInteger($ttl));
+
   my $r = undef;
   eval { $r = $redis->expire($key, $ttl); };
   return (0, $@) if ($@);
   return (1, $r);
 }
+
+sub persist {
+  my $redis = shift @_;
+  my $key   = shift @_;
+
+  return (0, "unknown redis")          if (!defined $redis);
+  return (0, "bad or missing key")     if (Helpers::Misc::isEmpty($key));
+
+  my $r = undef;
+  eval { $r = $redis->persist($key); };
+  return (0, $@) if ($@);
+  return (1, $r);
+}
+
 
 sub ping {
   my $redis = shift @_;
@@ -899,6 +917,10 @@ sub new_multi_exec
                           },
             "expire"  =>  {
                             call => \&expire,
+                            type => "string",
+                          },
+            "persist" =>  {
+                            call => \&persist,
                             type => "string",
                           },
             "echo"    =>  {

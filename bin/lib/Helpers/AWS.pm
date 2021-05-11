@@ -13,7 +13,7 @@ use JSON;
 use Helpers::Misc;
 
 BEGIN {
-  our $VERSION = "0.11";
+  our $VERSION = "0.12";
 }
 
 
@@ -97,6 +97,16 @@ sub isValidAWSUserPath
 
   $path =~ s/[A-Z]|[0-9]|-|_|\///gi;
   return 1 if ($path eq '');
+  return 0;
+}
+
+sub isValidAWSLambdaArn
+{
+  my $arn = shift @_;
+
+  return 0 if (Helpers::Misc::isEmpty($arn));
+
+  return 1 if ( $arn =~ /^arn\:aws\:lambda\:/g );
   return 0;
 }
 

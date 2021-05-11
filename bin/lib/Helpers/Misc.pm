@@ -12,7 +12,7 @@ use DateTime;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.35";
+  our $VERSION = "0.36";
 }
 
 # readfile() and readfile_new() are functions to slurp content of a file.
@@ -402,9 +402,8 @@ sub isUnsignedInteger
 {
   my $a = shift @_;
 
-  return 0 if (!defined $a);
-  $a =~ s/\d+//g;
-  return 1 if ($a eq '');
+  return 0 if (isEmpty($a));
+  return 1 if ( $a =~ /^\d+$/g );
   return 0;
 }
 
@@ -412,7 +411,7 @@ sub isPositiveInteger
 {
   my $a = shift @_;
 
-  return 0 if (!isUnsignedInteger($a));
+  return 0 if (!isInteger($a));
   return ($a > 0);
 }
 
@@ -420,18 +419,16 @@ sub isInteger
 {
   my $a = shift @_;
 
-  return 0 if (!defined $a);
-  if ($a =~ m/^\+/)
+  my $r = 0;
+  if (!isEmpty($a))
     {
+      $a = sprintf("%s", $a);
       $a =~ s/^\+//g;
-      return isUnsignedInteger($a);
+      $a =~ s/^-//g;
+
+      $r = isUnsignedInteger($a);
     }
-  if ($a =~ m/^\-/)
-    {
-      $a =~ s/^\-//g;
-      return isUnsignedInteger($a);
-    }
-  return isUnsignedInteger($a);
+  return $r;
 }
 
 sub collapse_spaces
@@ -488,6 +485,21 @@ sub timestamp_in_ms
   return sprintf("%s", $etime_ms);
 }
 
+sub utc_to_string
+{
+  my $opt = shift @_;
+
+  my $default_formatter = "%Y-%m-%d %H:%M:%S %Z";
+  my $default_epoch     = time();
+
+  my $formatter = $default_formatter; $formatter = $opt->{'formatter'} if (defined $opt->{'formatter'});
+  my $epoch     = $default_epoch;     $epoch     = $opt->{'epoch'}     if (defined $opt->{'epoch'});
+
+  my $dt = DateTime->from_epoch(epoch => $epoch );
+  my $now_str = sprintf("%s", $dt->strftime($formatter));
+  return $now_str;
+}
+
 sub datetime_ymd_hms
 {
   my $dt = shift @_;
@@ -542,6 +554,17 @@ sub is_active_pid_in_file {
   return 0 if ($pid < 2 || $pid > $max_pid);
 
   return Helpers::Misc::is_active_pid($pid);
+}
+
+sub isValidUuidV4 {
+  my $uuid = shift @_;
+
+  return 0 if (!defined $uuid);
+
+  $uuid =~ s/^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$//i;
+
+  return 1 if ($uuid eq '');
+  return 0;
 }
 
 sub isInBetween
