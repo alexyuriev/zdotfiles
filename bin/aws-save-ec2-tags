@@ -5,7 +5,7 @@
 # Saves AWS EC2 tags
 # Requires configured aws tool
 #
-# Version 0.0.5
+# Version 0.0.7
 
 use strict;
 use warnings;
@@ -53,6 +53,10 @@ use constant ERR_MSG_MISSING_TAG                => qq(Need provide a name of the
 use constant ERR_MSG_MISSING_OUTPUT             => qq(Need a name of the file to write tag values);
 use constant ERR_MSG_MODE_NON_OCTAL             => qq(Permissions mode needs to be a octal four or five digit string starting with '0');
 use constant ERR_MSG_SET_TAG_FAILED             => qq(Failed to set a tag %s to value %s on AWS EC2 instance %s in region %s);
+use constant ERR_MSG_MODE_CONFLICT              => qq(Cannot use --tag-control-file together with --mode, --tag, --output-file or --overwrite);
+
+use constant AWS_SAVE_EC2_TAGS_DEFAULT_FILE_MODE => "0600";
+use constant AWS_SAVE_EC2_TAGS_DEFAULT_OVERWRITE => 0;
 
 our $logger = undef;
 our $cleanup_vars = undef;
@@ -64,14 +68,15 @@ our $cleanup_vars = undef;
                 'TOOL_DESC'       => qq(Saves tags from AWS EC2 instance to a file),
                 'TOOL_VER_MAJOR'  => 0,
                 'TOOL_VER_MINOR'  => 0,
-                'TOOL_VER_PATCH'  => 5,
+                'TOOL_VER_PATCH'  => 7,
 
-                'tag'             => undef,
-                'mode'            => 0600,
-                'mode_new'        => undef,
-                'output_file'     => undef,
-                'instance_id'     => undef,
-                'region'          => undef,
+                'tag'               => undef,
+                'overwrite'         => undef,
+                'mode'              => undef,
+                'output-file'       => undef,
+                'instance-id'       => undef,
+                'region'            => undef,
+                'tag-control-file'  => undef,
 
                 '_need-config'            => 0,
                 'config'                  => undef,
@@ -90,9 +95,11 @@ our $cleanup_vars = undef;
 
   my $ret = GetOptions( "tag=s"                   => \$opt->{'tag'},
                         "region=s"                => \$opt->{'region'},
-                        "instance-id=s"           => \$opt->{'instance_id'},
-                        "mode=s"                  => \$opt->{'mode_new'},
-                        "output-file=s"           => \$opt->{'output_file'},
+                        "instance-id=s"           => \$opt->{'instance-id'},
+                        "mode=s"                  => \$opt->{'mode'},
+                        "output-file=s"           => \$opt->{'output-file'},
+                        "tag-control-file=s"      => \$opt->{'tag-control-file'},
+                        "overwrite"               => \$opt->{'overwrite'},
 
                         "log-tag=s"               => \$opt->{'log-tag'},
                         "pid-file=s"              => \$opt->{'pid-file'},
@@ -143,12 +150,31 @@ our $cleanup_vars = undef;
 
   # finished dealing with a standard config
 
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_INSTANCE_ID)     if (Helpers::Misc::isEmpty($config->{'instance_id'}));
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_INSTANCE_ID)     if (!Helpers::AWS::isValidEC2InstanceId($config->{'instance_id'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_INSTANCE_ID)     if (Helpers::Misc::isEmpty($config->{'instance-id'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_INSTANCE_ID)     if (!Helpers::AWS::isValidEC2InstanceId($config->{'instance-id'}));
   Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_AWS_EC2_REGION)  if (Helpers::Misc::isEmpty($config->{'region'}));
   Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INVALID_REGION)          if (!Helpers::AWS::isValidAWSRegion($config->{'region'}));
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_TAG)             if (Helpers::Misc::isEmpty($config->{'tag'}));
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_OUTPUT)          if (Helpers::Misc::isEmpty($config->{'output_file'}));
+
+  if (!Helpers::Misc::isEmpty($config->{'tag-control-file'}))
+    {
+      my $errors = 0;
+      foreach my $f (qw/tag overwrite mode output-file/)
+        {
+          $errors++ if (defined $config->{$f});
+        }
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MODE_CONFLICT) if ($errors);
+    }
+  else
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_TAG)    if (Helpers::Misc::isEmpty($config->{'tag'}));
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_OUTPUT) if (Helpers::Misc::isEmpty($config->{'output-file'}));
+
+      $config->{'mode'}       = enforce_valid_mode($config->{'mode'});
+      $config->{'mode'}       = AWS_SAVE_EC2_TAGS_DEFAULT_FILE_MODE if (!defined $config->{'mode'});
+      $config->{'mode'}       = oct($config->{'mode'});
+
+      $config->{'overwrite'}  = AWS_SAVE_EC2_TAGS_DEFAULT_OVERWRITE if (!defined $config->{'overwrite'});
+    }
 
   Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_SLEEP_AT_EXIT_POSITIVE) if (!Helpers::Misc::isUnsignedInteger($opt->{'sleep-at-exit'}));
   if ($opt->{'sleep-at-exit'} != 0)
@@ -158,53 +184,99 @@ our $cleanup_vars = undef;
       $cleanup_vars->{'sleep-at-exit'} = $v;
     }
 
-  # main tool
+  # # main tool
 
-  if (defined $config->{'mode_new'})
+  my @all_tags = ();
+  if ($config->{'tag-control-file'})
     {
-      my $len = length($config->{'mode_new'});
-      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MODE_NON_OCTAL) if (!Helpers::Misc::isStringOctal($config->{'mode_new'}) || (($len != 4) && ($len != 5)));
-      $opt->{'mode'} = oct($config->{'mode_new'});
+      my $tref = read_control_file($config->{'tag-control-file'});
+      @all_tags = @$tref;
+    }
+  else
+    {
+      my $tag;
+      foreach my $f (qw/tag mode output-file override/) { $tag->{$f} = $config->{$f} };
+      push @all_tags, $tag;
     }
 
-  my $cmd = sprintf("aws ec2 describe-tags --filter 'Name=resource-id,Values=%s' 'Name=key,Values=%s' --region=%s|",
-                     $config->{'instance_id'},
-                     $config->{'tag'},
-                     $config->{'region'});
+  my $cmd = sprintf("aws ec2 describe-tags --region=%s --filter 'Name=resource-id,Values=%s'|",
+                     $config->{'region'},
+                     $config->{'instance-id'});
   my $dptr = undef;
-  ($ret, $dptr) = Helpers::Misc::readFile($cmd);
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to fetch value for tag '%s' from AWS instance '%s' in region '%s'") if (!$ret);
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, "AWS EC2 API returned an invalid response for a tag description") if ($$dptr eq '');
+  ($ret, $dptr) = Helpers::Misc::readFile_new($cmd);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to fetch tags from AWS instance '%s' in region '%s'",
+                                                  $config->{'instance-id'},
+                                                  $config->{'region'}) if (!$ret);
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "AWS EC2 API returned an invalid response for tags assigned to instance '%s' region '%s'",
+                                                  $config->{'instance-id'},
+                                                  $config->{'region'}) if (!defined $dptr);
 
   my $tag_obj = undef;
   ($ret, $tag_obj) = Helpers::Misc::fromJSON($$dptr);
   Helpers::Misc::display_and_exit( EXIT_FAILURE, "AWS EC2 API returned a non-JSON for a tag description: %s", $tag_obj) if (!$ret);
   Helpers::Misc::display_and_exit( EXIT_FAILURE, "JSON returned by AWS EC2 API does not contain Tags node") if (!defined $tag_obj->{'Tags'});
 
+  my $tags_hash = undef;
+
   my $value = undef;
   foreach my $this_tag (@{$tag_obj->{'Tags'}})
     {
-      next if (Helpers::Misc::isEmpty($this_tag->{'Value'}));
-      $value = $this_tag->{'Value'};
-      last;
+      $tags_hash->{$this_tag->{'Key'}} = $this_tag->{'Value'};
     }
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Can't find a tag '%s' assigned to AWS EC2 instance '%s' in region '%s'",
-                                                  $config->{'tag'},
-                                                  $config->{'instance_id'},
-                                                  $config->{'region'}) if (!defined $value);
-  $value =~ s/,/\n/g; $value .= "\n";
-  my $fname = $opt->{'output_file'} . "." . $$;
-  my $r = undef;
-  ($ret, $r) = Helpers::Misc::writeFile($fname, $value, { 'mode' => $config->{'mode'}});
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to write tag value into a temporary file %s: %s", $fname, $r) if (!$ret);
 
-  $ret = rename $fname, $opt->{'output_file'};
-  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Failed to rename temporary file %s to output file %s", $fname, $config->{'output_file'}) if (!$ret);
-  Helpers::Misc::display_and_exit( EXIT_SUCCESS, "Wrote value of '%s' tag of AWS EC2 instance '%s' in region '%s' to '%s'",
-                                                  $config->{'tag'},
-                                                  $config->{'instance_id'},
-                                                  $config->{'region'},
-                                                  $config->{'output_file'});
+  my $has_errors = 0;
+
+  foreach my $this_tag (@all_tags)
+    {
+      next if (!defined $tags_hash->{$this_tag->{'tag'}});
+
+      # we will write if
+      # 1) output file does not exists
+      # 2) there's an overwrite flag
+
+      my $write_file = 1;
+
+      if (!$this_tag->{'overwrite'} || $this_tag->{'overwrite'} ne "1")
+        {
+          $write_file = 0 if ( -f $this_tag->{'output-file'});
+        }
+
+      next if (!$write_file);
+
+      # write file
+
+      my $value = $tags_hash->{$this_tag->{'tag'}} . "\n";
+
+      my $fname = $this_tag->{'output-file'} . "." . $$;
+
+      my $r = undef;
+      ($ret, $r) = Helpers::Misc::writeFile($fname, $value, { 'mode' => $this_tag->{'mode'}});
+      if (!$ret)
+        {
+          $has_errors = 1;
+          $logger->log( "Failed to write tag '%s' value into a temporary file '%s': %s",
+                        $this_tag->{'tag'},
+                        $fname,
+                        $r);
+        }
+
+      $ret = rename $fname, $this_tag->{'output-file'};
+      if (!$ret)
+        {
+          $has_errors = 1;
+          $logger->log( "Failed to rename temporary file '%s' to output file '%s' for tag '%s'",
+                        $fname,
+                        $config->{'output-file'},
+                        $this_tag->{'tag'});
+        }
+
+    }
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Tag processing run for instance %s in region %s has resulted in some errors",
+                                                $config->{'instance-id'},
+                                                $config->{'region'}) if ($has_errors);
+  exit(EXIT_SUCCESS);
 }
 
 exit(EXIT_FAILURE);
@@ -218,15 +290,19 @@ sub display_help_and_exit
   printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
   printf("Options:\n\n");
   printf("  --instance-id=<id>             Get tag on AWS instance id <id>\n");
-  printf("                                 Default: %s\n", $opt->{'instance_id'});
+  printf("                                 Default: %s\n", $opt->{'instance-id'});
   printf("  --region=<region>              Get tag on AWS instance in region <region>\n");
   printf("                                 Default: %s\n", $opt->{'region'});
+  printf("  --tag-control-file=<tagf>      Use a tag control file <tagf> to process tags\n");
+  printf("                                 Default: %s\n", $opt->{'tag-control-file'});
   printf("  --tag=<tag>                    Get tag <tag>\n");
   printf("                                 Default: %s\n", $opt->{'tag'});
   printf("  --output-file=<filename>       Write tag value into file <filename>\n");
-  printf("                                 Default: %s\n", $opt->{'output_file'});
+  printf("                                 Default: %s\n", $opt->{'output-file'});
   printf("  --mode=<mode>                  Set output <filename> permissions to <mode>\n");
   printf("                                 Default: %s\n", $opt->{'mode'});
+  printf("  --overwrite                    Overwrite the output file if it exists\n");
+  printf("                                 Default: do not\n");
   printf("  --sleep-at-exit=<sleep-sec>    Sleep for <sleep-sec> before exiting\n");
   printf("                                 Default: %s\n", $opt->{'sleep-at-exit'});
   printf("  --randomize-sleep-at-exit      Randomize sleep at exit delay between its value and 0\n");
@@ -247,4 +323,67 @@ sub display_help_and_exit
 END {
   sleep($cleanup_vars->{'sleep-at-exit'}) if (defined $cleanup_vars->{'sleep-at-exit'} && $cleanup_vars->{'sleep-at-exit'} != 0);
   unlink ($cleanup_vars->{'remove_pidfile'}) if (defined $cleanup_vars->{'remove_pidfile'});
+}
+
+sub read_control_file {
+  my $fname = shift @_;
+
+  my ($ret, $dptr) = Helpers::Misc::readFile($fname);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Error reading file %s : %s", $fname, $dptr) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "File %s is empty", $fname) if (!defined $dptr);
+
+  my $tags_obj = undef;
+  ($ret, $tags_obj) = Helpers::Misc::fromJSON($$dptr);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Content of a file %s is not a valid JSON: %s", $fname, $tags_obj) if (!$ret);
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Control file %s does not have a 'tags' node", $fname) if (!defined $tags_obj->{'tags'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Control file %s 'tags' node does not point to an array", $fname) if (ref($tags_obj->{'tags'}) ne "ARRAY");
+
+  my $count = 1;
+  foreach my $this_tag (@{$tags_obj->{'tags'}})
+    {
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Control file %s 'tags' node array element is not a hash", $fname) if (ref($this_tag) ne "HASH");
+
+      foreach my $f (qw/tag output-file mode overwrite/)
+        {
+          Helpers::Misc::display_and_exit(EXIT_FAILURE, "Control file %s 'tags' node array element %s is missing a field '%s'",
+                                                        $fname, $count, $f) if (!defined $this_tag->{$f});
+        }
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Control file %s 'tag' node array element %s field 'tag' has an invalid value '%s'",
+                                                    $fname, $count, $this_tag->{'tag'}) if (!isValidTag($this_tag->{'tag'}));
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Control file %s 'tag' node array element %s field 'output-file' is empty",
+                                                    $fname, $count) if (Helpers::Misc::isEmpty($this_tag->{'output-file'}));
+      Helpers::Misc::display_and_exit(EXIT_FAILURE, "Control file %s 'tag' node array element %s field 'overwrite' is neither '1' nor '0'",
+                                                    $fname, $count) if ($this_tag->{'overwrite'} ne "1" && $this_tag->{'overwrite'} ne "0");
+
+      $this_tag->{'mode'} = enforce_valid_mode($this_tag->{'mode'});
+      $this_tag->{'mode'} = AWS_SAVE_EC2_TAGS_DEFAULT_FILE_MODE if (!defined $this_tag->{'mode'});
+      $this_tag->{'mode'} = oct($this_tag->{'mode'});
+
+      $count++;
+    }
+
+  return $tags_obj->{'tags'};
+}
+
+
+sub isValidTag {
+  my $tag = shift @_;
+
+  $tag =~ s/[a-zA-Z0-9]//g;
+  $tag =~ s/[-_]//g;
+
+  return 1 if ($tag eq '');
+  return 0;
+}
+
+sub enforce_valid_mode {
+  my $mode = shift @_;
+
+  if (defined $mode)
+    {
+      my $len = length($mode);
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MODE_NON_OCTAL) if (!Helpers::Misc::isStringOctal($mode) || (($len != 4) && ($len != 5)));
+    }
+  return $mode;
 }
