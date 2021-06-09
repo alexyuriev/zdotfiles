@@ -7,12 +7,13 @@ use strict;
 use warnings;
 
 use FileHandle;
+use File::Path;
 use Cwd;
 use DateTime;
 use JSON;
 
 BEGIN {
-  our $VERSION = "0.36";
+  our $VERSION = "0.39";
 }
 
 # readfile() and readfile_new() are functions to slurp content of a file.
@@ -163,6 +164,184 @@ sub writeFile
   $fhw->close() if (!$is_stdout);
   return (1, qq(OK));
 }
+
+#    FUNCTION: ($ret, $err) = deleteFile($filename, $opt)
+#
+#       INPUT: $filename   - a name of a file to delete
+#              $opt        - a control hash
+#
+#                   .skip-not-found   1 - do not return an error if delete failed because file was not found
+#                                     0 (default) - return error if delete failed because file was not found
+#
+#      OUTPUT:
+#
+# DESCRIPTION:
+#
+# $opt affects how the delete process is handled.
+#
+#  .skip-not-found => 1    Do not return an error in $ret if delete failed because file was not found.
+#                  => 0    (default) Return error in $ret, $err if delete failed because file was not found.
+#
+
+sub deleteFile {
+  my $fname = shift @_;
+  my $opt   = shift @_;
+
+  my $control = {
+                  'skip-not-found' => 0,
+                };
+
+  if (defined $opt)
+    {
+      my $f = 'skip-not-found';
+      if (defined $opt->{$f})
+        {
+          return (0, sprintf("opt.%s must be 0 or 1", $f)) if ($opt->{$f} ne "0" && $opt->{$f} ne "1");
+          $control->{$f} = $opt->{$f};
+        }
+    }
+
+  return (0, "Must provide the name of a file to delete") if (Helpers::Misc::isEmpty($fname));
+
+  my $ret = unlink $fname;
+  return (1, "OK") if ($ret == 1);
+
+  # skip-not-found override
+
+  return (1, $!) if ($control->{'skip-not-found'} && $! eq "No such file or directory");
+
+  return (0, $!);
+}
+
+
+sub deleteDirectory {
+  my $dirname = shift @_;
+
+  return (0, "Must provide the name of a directory to delete") if (Helpers::Misc::isEmpty($dirname));
+
+  my $ret = rmdir $dirname;
+
+  return (0, $!) if ($ret != 1);
+  return (1, "OK");
+
+}
+
+sub createDirectory {
+  my $dir = shift @_;
+  my $opt = shift @_;
+
+  return (0, "directory must be defined")             if (Helpers::Misc::isEmpty($dir));
+  return (0, "directory attributes must be defined")  if (!defined $opt);
+  return (0, "directory mode must be defined")        if (!defined $opt->{'mode'});
+
+  my $flag_need_create = 1;
+
+  if ( -d $dir)
+    {
+      return (0, qq(Directory already exists)) if (defined $opt->{'exists-fails'} && $opt->{'exists-fails'});
+      $flag_need_create = 0 if (defined $opt->{'exists-skips-create'} && $opt->{'exists-skips-create'});
+    }
+
+  $opt->{'logger'}->log($opt->{'creating-message'}) if (defined $opt->{'logger'} && !Helpers::Misc::isEmpty($opt->{'creating-message'}));
+
+  my $ret_code = undef;
+
+  File::Path::make_path($dir, { 'verbose' => 0, 'mode' => $opt->{'mode'}, 'error' => \$ret_code});
+  return (0, @$ret_code[0]->{$dir}) if (scalar @$ret_code != 0);
+  return (1, "OK");
+}
+
+sub deleteFileList
+{
+  my $list = shift @_;
+  my $opt  = shift @_;
+
+  return (0, "List is not defined")   if (!defined $list);
+  return (0, "List is not an array")  if (ref($list) ne qq(ARRAY));
+
+  my $l           = undef; $l = $opt->{'logger'} if (defined $opt && defined $opt->{'logger'});
+
+  my $log_error       = undef; $log_error      = 1 if (defined $l && defined $opt->{'log-error'}   && $opt->{'log-error'}   eq "1");
+  my $log_success     = undef; $log_success    = 1 if (defined $l && defined $opt->{'log-success'} && $opt->{'log-success'} eq "1");
+
+  my $log_not_found   = 0; $log_not_found  = 1 if (defined $l && defined $opt->{'log-not-found'} && $opt->{'log-not-found'} eq "1");
+  my $skip_not_found  = 0; $skip_not_found = 1 if (defined $opt->{'skip-not-found'} && $opt->{'skip-not-found'} eq "1");;
+
+  my $has_errors = 0;
+
+  foreach my $this_file (@{$list})
+    {
+      my ($ret, $errcode) = Helpers::Misc::deleteFile($this_file, { 'skip-not-found' => $skip_not_found });
+      if (!$ret)
+        {
+          $l->log("Failed to delete file %s : %s", $this_file, $errcode) if ($log_error);
+          $has_errors = 1 if (!$has_errors);
+        }
+      else
+        {
+          if ($log_not_found && $errcode eq "No such file or directory")
+            {
+              $l->log("Non-fatal error: file %s was not found", $this_file);
+            }
+          else
+            {
+              $l->log("Successfully deleted file %s", $this_file) if ($log_success);
+            }
+        }
+    }
+  return (0, "Some files were not deleted") if ($has_errors);
+  return (1, "OK");
+
+}
+
+sub deleteDirectoryList
+{
+  my $list = shift @_;
+  my $opt  = shift @_;
+
+  return (0, "List is not defined")   if (!defined $list);
+  return (0, "List is not an array")  if (ref($list) ne qq(ARRAY));
+
+  my $l           = undef; $l = $opt->{'logger'} if (defined $opt && defined $opt->{'logger'});
+
+  my $log_error   = undef; $log_error   = 1 if (defined $l && defined $opt->{'log-error'}   && $opt->{'log-error'}   eq "1");
+  my $log_success = undef; $log_success = 1 if (defined $l && defined $opt->{'log-success'} && $opt->{'log-success'} eq "1");
+
+  my $has_errors = 0;
+
+  my @next_pass_list = @{$list};
+
+  for (my $this_pass = 1;; $this_pass++)
+    {
+      $has_errors      = 0;
+      my $pass_deleted = 0;
+
+      my @dirs2remove  = @next_pass_list;
+      @next_pass_list  = ();
+
+      foreach my $this_dir (@dirs2remove)
+        {
+          my ($ret, $errcode) = Helpers::Misc::deleteDirectory($this_dir);
+          if (!$ret)
+            {
+              $l->log("Failed to delete directory %s during pass #%s : %s", $this_dir, $this_pass, $errcode) if ($log_error);
+              $has_errors = 1 if (!$has_errors);
+
+              push @next_pass_list, $this_dir;
+              next;
+            }
+
+          $l->log("Successfully deleted directory %s during pass #%s", $this_dir, $this_pass) if ($log_success);
+          $pass_deleted++;
+        }
+
+      last if ($has_errors   == 0); # it was a final pass because we deleted everything
+      last if ($pass_deleted == 0); # it was a final pass because we deleted nothing
+    }
+  return (0, "Some directories were not deleted") if ($has_errors);
+  return (1, "OK");
+}
+
 
 sub isEmpty
 {
