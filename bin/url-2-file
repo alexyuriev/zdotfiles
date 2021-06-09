@@ -4,7 +4,7 @@
 #
 # Stores content of the URL in a file
 #
-# Version 0.0.3
+# Version 0.0.4
 
 use strict;
 use warnings;
@@ -35,6 +35,9 @@ use LWP::UserAgent;
 use Helpers::Misc;
 use Helpers::Logger;
 
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
 our $logger = undef;
 
 {
@@ -46,14 +49,15 @@ our $logger = undef;
                 'TOOL_VER_MINOR'  => 0,
                 'TOOL_VER_PATCH'  => 3,
                 'url'             => undef,
-                'target_file'     => undef,
+                'target-file'     => undef,
                 'stdout'          => 0,
                 'syslog'          => 0,
-                'target_mode'     => 0644,  # this is octal
-                'target_mode_str' => undef,
-                'polling_delay'   => 10,
-                'max_retries'     => 6000,
-                '404_return'      => 1,
+                'target_mode'     => "0644",  # this is octal
+                'target-mode-str' => undef,
+                'polling-delay'   => 10,
+                'max-retries'     => 6000,
+                '404-return'      => 1,
+                'append-newline'  => 0,
                 'verbose'         => 0,
                 'help'            => 0,
             };
@@ -61,12 +65,13 @@ our $logger = undef;
   $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
 
   my $ret = GetOptions(   "url=s"           => \$opt->{'url'},
-                          "target-file=s"   => \$opt->{'target_file'},
-                          "polling-delay=i" => \$opt->{'polling_delay'},
-                          "target-mode=s"   => \$opt->{'target_mode_str'},
+                          "target-file=s"   => \$opt->{'target-file'},
+                          "polling-delay=i" => \$opt->{'polling-delay'},
+                          "target-mode=s"   => \$opt->{'target-mode-str'},
                           "stdout"          => \$opt->{'stdout'},
-                          "max-retries=i"   => \$opt->{'max_retries'},
+                          "max-retries=i"   => \$opt->{'max-retries'},
                           "syslog"          => \$opt->{'syslog'},
+                          "append-newline"  => \$opt->{'append-newline'},
                           "verbose"         => \$opt->{'verbose'},
                           "help"            => \$opt->{'help'},
                       );
@@ -80,37 +85,41 @@ our $logger = undef;
                                           'stderr' => 1,
                                        },
                       };
-
-  my $target_file_txt = $opt->{'target_file'}; $target_file_txt = qq(STDOUT) if ($opt->{'stdout'});
-
-  Helpers::Misc::display_and_exit(-1, qq(Need a source URL)) if (Helpers::Misc::isEmpty($opt->{'url'}));
-  Helpers::Misc::display_and_exit(-1, qq(Only one of target file name or --stdout can be selected)) if (!Helpers::Misc::isEmpty($opt->{'target_file'}) && $opt->{'stdout'});
-  Helpers::Misc::display_and_exit(-1, qq(Need a name of the target file or --stdout))  if (Helpers::Misc::isEmpty($opt->{'target_file'}) && !$opt->{'stdout'});
-
-  if (!Helpers::Misc::isEmpty($opt->{'target_mode_str'}))
-    {
-      $opt->{'target_mode_str'} = qq(0) . $opt->{'target_mode_str'} unless ( $opt->{'target_mode_str'} =~ m/^0/);
-      $opt->{'target_mode'} = oct($opt->{'target_mode_str'});
-    }
-
   $loggerConfig->{'loggers'}->{'syslog'} = {} if ($opt->{'syslog'});
-
   $logger = Helpers::Logger->new($loggerConfig);
+
+
+  my $target_file_txt = $opt->{'target-file'}; $target_file_txt = qq(STDOUT) if ($opt->{'stdout'});
+
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need a source URL"                                       ) if ( Helpers::Misc::isEmpty($opt->{'url'}));
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Only one of target file name or --stdout can be selected") if (!Helpers::Misc::isEmpty($opt->{'target-file'}) && $opt->{'stdout'});
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Need a name of the target file or --stdout")               if ( Helpers::Misc::isEmpty($opt->{'target-file'}) && !$opt->{'stdout'});
+
+  if (!Helpers::Misc::isEmpty($opt->{'target-mode-str'}))
+    {
+      $opt->{'target-mode-str'} = qq(0) . $opt->{'target-mode-str'} unless ( $opt->{'target-mode-str'} =~ m/^0/);
+      my $len = length($opt->{'target-mode-str'});
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, "Target mode must be a valid Unix octal file mode") if (!Helpers::Misc::isStringOctal($opt->{'target-mode-str'}) || (($len != 4) && ($len != 5)));
+      $opt->{'target_mode'} = oct($opt->{'target-mode-str'});
+    }
 
   my $data = undef;
   ($ret, $data) = get_url_data($opt->{'url'});
-  Helpers::Misc::display_and_exit(-1, qq(Failed to fetch data from url %s: %s), $opt->{'url'}, $data) if (!$ret);
-  Helpers::Misc::display_and_exit(0, qq(Received 404 from %s. Not writing content to %s), $opt->{'url'}, $target_file_txt) if (!defined $data);
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to fetch data from url %s: %s", $opt->{'url'}, $data) if (!$ret);
+  Helpers::Misc::display_and_exit(EXIT_SUCCESS, "Received 404 from %s. Not writing content to %s", $opt->{'url'}, $target_file_txt) if (!defined $data);
+
+  $data .= "\n" if ($opt->{'append-newline'});
 
   my $r = undef;
-  ($ret, $r) = Helpers::Misc::writeFile($opt->{'target_file'}, $data, { 'mode' => $opt->{'target_mode'} });
-  Helpers::Misc::display_and_exit(-1, qq(Failed to write data fetched from url %s to %s: %s), $opt->{'url'}, $opt->{'target_file'}, $r) if (!$ret);
+  ($ret, $r) = Helpers::Misc::writeFile($opt->{'target-file'}, $data, { 'mode' => $opt->{'target_mode'} });
+  Helpers::Misc::display_and_exit(EXIT_FAILURE, "Failed to write data fetched from url %s to %s: %s", $opt->{'url'}, $opt->{'target-file'}, $r) if (!$ret);
 
-  Helpers::Misc::display_and_exit(0, qq(Wrote data fetched from %s to %s), $opt->{'url'}, $target_file_txt);
+  Helpers::Misc::display_and_exit(EXIT_SUCCESS, "Wrote data fetched from %s to %s", $opt->{'url'}, $target_file_txt);
 
+  exit(EXIT_FAILURE);
 }
 
-exit(0);
+exit(EXIT_FAILURE);
 
 sub get_url_data {
 
@@ -118,7 +127,7 @@ sub get_url_data {
 
   my $l = $main::logger;
   my $result = undef;
-  for(my $retry_count = 1; $retry_count <= $main::opt->{'max_retries'}; $retry_count++)
+  for(my $retry_count = 1; $retry_count <= $main::opt->{'max-retries'}; $retry_count++)
     {
       my $ua = LWP::UserAgent->new();
       $ua->agent($main::opt->{'TOOL_FULL_ID'});
@@ -127,18 +136,32 @@ sub get_url_data {
       my $res = $ua->request($req);
       if ($res->code eq qq(404))
         {
-          return (1, undef) if ($main::opt->{'404_return'} == 1)
+          return (1, undef) if ($main::opt->{'404-return'} == 1)
         }
       if ($res->code ne qq(200))
         {
-          $l->log("Sleeping %s seconds and making attempt number %s", $main::opt->{'polling_delay'}, $retry_count);
-          sleep($main::opt->{'polling_delay'});
+          $l->log("Sleeping %s seconds and making attempt number %s", $main::opt->{'polling-delay'}, $retry_count);
+          sleep($main::opt->{'polling-delay'});
           next;
         }
       $result = $res->decoded_content();
       last;
     }
   return (1, $result);
+}
+
+
+sub enforce_valid_mode {
+  my $mode = shift @_;
+
+  return undef if (!defined $mode);
+
+  if (defined $mode)
+    {
+      my $len = length($mode);
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, "The mode must be a valid octal number") if (!Helpers::Misc::isStringOctal($mode) || (($len != 4) && ($len != 5)));
+    }
+  return $mode;
 }
 
 sub display_help_and_exit
@@ -152,18 +175,20 @@ sub display_help_and_exit
   printf("      --url=<url>           Pull data from url <url>\n");
   printf("                            Default: %s\n", $opt->{'url'});
   printf("      --target-file=<file>> Store the content of the URL in file <file>\n");
-  printf("                            Default: %s\n", $opt->{'target_file'});
+  printf("                            Default: %s\n", $opt->{'target-file'});
   printf("      --target-mode=<mode>  After writing, change file mode to <mode>\n");
   printf("                            Default: %s\n", $opt->{'target_mode'});
   printf("      --stdout              Instead of writing to file, write to STDOUT\n");
   printf("                            Default: no\n");
+  printf("      --append-newline      Append a new line character to the end of the data\n");
+  printf("                            Default: no\n");
   printf("      --max-retries=<count> If failed, retry at most <count> times\n");
-  printf("                            Default: %s\n", $opt->{'max_retries'});
+  printf("                            Default: %s\n", $opt->{'max-retries'});
   printf("      --polling-delay=<s>   Upon failure, wait <s> seconds before retrying\n");
-  printf("                            Default: %s\n", $opt->{'polling_delay'});
+  printf("                            Default: %s\n", $opt->{'polling-delay'});
   printf("      --syslog              Also log messages into syslog\n");
   printf("      --help                This help\n");
 
-  exit(0);
+  exit(EXIT_FAILURE);
 
 }
