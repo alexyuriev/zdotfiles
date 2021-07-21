@@ -1,0 +1,12 @@
+{
+	"_comment_1" : "Credentials for AWS IAM user   ",
+	"_comment_2" : "This useer is used for backing ",
+	"_comment_3" : "******************************************************",
+
+	"section"    : "repo-backups",
+	"key_list"   : 
+		[
+			"AWS_ACCESS_KEY_ID",
+			"AWS_SECRET_ACCESS_KEY"
+		]
+}

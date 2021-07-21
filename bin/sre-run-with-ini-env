@@ -1,0 +1,168 @@
+#!/usr/bin/perl
+
+# sre-run-with-ini-env
+#
+# Runs a command line with environment set from /init file. Mostly useful for mapping aws credentials
+#
+# Version 0.0.2
+
+use strict;
+use warnings;
+
+BEGIN
+{
+  use File::Spec;
+  use File::Basename qw[];
+  use Cwd 'abs_path';
+
+  my $APP_BINPATH = File::Basename::dirname( abs_path( $0 ) );
+  unshift(@INC, $APP_BINPATH);
+
+  my @list = File::Spec->splitdir($APP_BINPATH);
+  pop @list;
+  push @list, qq(lib);
+
+  my $APP_LIBPATH = join('/', @list);
+  unshift(@INC, $APP_LIBPATH);
+  push @INC, $APP_BINPATH . qq(/lib);
+  undef $APP_LIBPATH;
+  undef $APP_BINPATH;
+}
+
+use Getopt::Long qw(:config no_auto_abbrev);
+use Config::IniFiles;
+use Helpers::Logger;
+use Helpers::Misc;
+
+use constant EXIT_FAILURE => 1;
+use constant EXIT_SUCCESS => 0;
+
+use constant ERR_MSG_MISSING_CONFIG           => qq(Unable to read configuratin file %s : %s);
+use constant ERR_MSG_CONFIG_NOT_JSON          => qq(Configuration file %s does not appear to be a JSON: %s);
+use constant ERR_MSG_MISSING_KEY_LIST         => qq(Configuration file %s is missing a list of keys to extract from an ini file %s);
+use constant ERR_MSG_MISSING_INI_FILE         => qq(Need a name of ini file to process);
+use constant ERR_MSG_BAD_INI_FILE             => qq(Cannot process ini file %s);
+use constant ERR_MSG_MISSING_COMMAND          => qq(Need a command to execute under configured environment);
+use constant ERR_MSG_MISSING_SECTION          => qq(Need a section of ini file to extract the keys from);
+use constant ERR_MSG_INI_FILE_MISSING_KEY     => qq(The ini file %s is missing a key %s in section %s);
+
+our $logger = undef;
+
+{
+  my $opt = {
+                'TOOL_NAME'       => qq(sre-run-with-ini-env),
+                'TOOL_DESC'       => qq(Runs a comand with environment provided by specific .ini file),
+                'TOOL_VER_MAJOR'  => 0,
+                'TOOL_VER_MINOR'  => 0,
+                'TOOL_VER_PATCH'  => 2,
+
+                'ini_file'        => undef,
+                'section'         => undef,
+                'syslog'          => 0,
+
+                'config'          => undef,
+                'verbose'         => 1,
+                'help'            => 0,
+            };
+
+  $opt->{'TOOL_FULL_ID'} = $opt->{'TOOL_NAME'} . qq( ver ) . $opt->{'TOOL_VER_MAJOR'} . qq(.) . $opt->{'TOOL_VER_MINOR'} . qq(.) . $opt->{'TOOL_VER_PATCH'};
+  $opt->{'default_config'} = sprintf("%s/.config/config-%s.json", Helpers::Misc::get_users_home_dir(), $opt->{'TOOL_NAME'});
+
+  my $loggerConfig =  {
+                        'ident' => $opt->{'TOOL_NAME'},
+                        'loggers' => { 'stdout' => 0, 'stderr' => 1, },
+                      };
+
+  my $ret = GetOptions(
+                          "config=s"    => \$opt->{'config'},
+                          "ini-file=s"  => \$opt->{'ini_file'},
+                          "syslog"      => \$opt->{'syslog'},
+                          "section=s"   => \$opt->{'section'},
+                          "help"        => \$opt->{'help'},
+                      );
+
+  display_help_and_exit($opt) if ($opt->{'help'} || !$ret);
+  $loggerConfig->{'loggers'}->{'syslog'} = {} if ($opt->{'syslog'});
+
+  my $cmd = join(' ', @ARGV);
+
+  $logger = Helpers::Logger->new($loggerConfig);
+
+  $opt->{'config'} = $opt->{'default_config'} if (Helpers::Misc::isEmpty($opt->{'config'}));
+  my $config_json_ptr = undef;
+  ($ret, $config_json_ptr) = Helpers::Misc::readFile($opt->{'config'});
+  if (!$ret)
+    {
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_CONFIG, $opt->{'config'}, $config_json_ptr) if ($opt->{'config'} ne $opt->{'default_config'});
+      $config_json_ptr = undef;
+    }
+
+  my $config = undef;
+  if (defined $config_json_ptr)
+    {
+      ($ret, $config) = Helpers::Misc::fromJSON($$config_json_ptr);
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_CONFIG_NOT_JSON, $opt->{'config'}, $config) if (!$ret);
+    }
+
+  foreach my $f (qw/ini_file section/)
+    {
+      $config->{$f} = $opt->{$f} if (!Helpers::Misc::isEmpty($opt->{$f}));
+    }
+
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_INI_FILE )                                          if (Helpers::Misc::isEmpty($config->{'ini_file'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_KEY_LIST, $opt->{'config'}, $config->{'ini_file'} ) if (!defined $config->{'key_list'});
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_SECTION )                                           if (Helpers::Misc::isEmpty($config->{'section'}));
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_MISSING_COMMAND )                                           if (Helpers::Misc::isEmpty($cmd));
+
+  my $inif = Config::IniFiles->new( -file => $config->{'ini_file'});
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_BAD_INI_FILE, $config->{'ini_file'}) if (!defined $inif);
+
+  my @key_list = ();
+  foreach my $this_entry (@{$config->{'key_list'}})
+    {
+      my $this_key = undef;
+      $this_key->{'name'}  = $this_entry;
+      $this_key->{'value'} = $inif->val($config->{'section'}, $this_key->{'name'});
+      Helpers::Misc::display_and_exit( EXIT_FAILURE, ERR_MSG_INI_FILE_MISSING_KEY, $config->{'ini_file'}, $this_key->{'name'}, $config->{'section'}) if (Helpers::Misc::isEmpty($this_key->{'value'}));
+      push @key_list, $this_key;
+    }
+
+  foreach my $this_entry (@key_list)
+    {
+      $ENV{$this_entry->{'name'}} = $this_entry->{'value'};
+    }
+
+  my $env_keys = join(qq(,), @{$config->{'key_list'}});
+
+  $logger->log("Executing command `%s` with a modified environment [%s]", $cmd, $env_keys);
+  $ret = system($cmd);
+  Helpers::Misc::display_and_exit( EXIT_FAILURE, "Execution failed for command `%s`", $cmd) if ($ret != 0);
+
+  exit( EXIT_SUCCESS );
+}
+
+exit( EXIT_FAILURE );
+
+sub display_help_and_exit
+{
+  my $opt = shift @_;
+
+  foreach my $k ( keys %$opt) { $opt->{$k} = qq(undefined) if (Helpers::Misc::isEmpty($opt->{$k})); }
+
+  printf("\n%s - %s\n\n", $opt->{'TOOL_FULL_ID'}, $opt->{"TOOL_DESC"});
+  printf("Options:\n\n");
+  printf("      --ini-file=<inifile.ini>      Read values from ini file <inifile.ini>\n");
+  printf("                                    Default: %s\n", $opt->{'ini_file'});
+  printf("      --section=<section>           Read values from a section <section>\n");
+  printf("                                    Default: %s\n", $opt->{'section'});
+  printf("      --config=<config.json>        Read configuration from a file <config.json>\n");
+  printf("                                    Deafult: %s\n", $opt->{'default_config'});
+  printf("      --syslog                      Send messages to syslog as well\n");
+  printf("      --help                        This help\n");
+  printf("                                    \n");
+  printf("      -- <command>                  Execute command <command> with the extracted environment\n");
+  printf("                                    Default: none\n");
+
+  exit( EXIT_SUCCESS );
+}
+
