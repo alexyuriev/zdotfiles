@@ -13,7 +13,7 @@ use JSON;
 use Helpers::Misc;
 
 BEGIN {
-  our $VERSION = "0.13";
+  our $VERSION = "0.14";
 }
 
 
@@ -22,6 +22,7 @@ my $AWS_EC2_TYPES = {
                       't2.nano'     => 1,
                       't1.micro'    => 1,
                       't2.micro'    => 1,
+                      't3.medium'   => 1,
                       't3.2xlarge'  => 1,
                       'm3.medium'   => 1,
                     };
