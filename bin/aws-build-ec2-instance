@@ -5,7 +5,7 @@
 # Launches instance from the AMI
 # Requires configured aws tool
 #
-# Version 0.0.9
+# Version 0.0.10
 
 use strict;
 use warnings;
@@ -74,6 +74,7 @@ our $cleanup_obj  =  { files => [], directories => [] };
                 'instance_type'           => undef,
                 'region'                  => undef,
                 'security_group'          => undef,
+                'ebs-optimized'           => undef,
                 'hostname'                => undef,
                 'sec_fencer_build'        => undef,
                 'root-disk-size'          => undef,
@@ -94,6 +95,7 @@ our $cleanup_obj  =  { files => [], directories => [] };
                           'security-group=s'  => \$opt->{'security_group'},
                           "instance-type=s"   => \$opt->{'instance_type'},
                           "root-disk-size=s"  => \$opt->{'root-disk-size'},
+                          "ebs-optimized"     => \$opt->{'ebs-optimized'},
                           "hostname=s"        => \$opt->{'hostname'},
                           "sec-fencer-build"  => \$opt->{'sec_fencer_build'},
                           "stdout-json"       => \$opt->{'stdout_json'},
@@ -140,10 +142,24 @@ our $cleanup_obj  =  { files => [], directories => [] };
       $config = $this_config->{'aws-ec2-builder'};
     }
 
-  foreach my $f (qw/tmpdir ami_id hostname instance_type security_group sec_fencer_build region zone root-disk-size/)
-    {
-      $config->{$f} = $opt->{$f} if (!Helpers::Misc::isEmpty($opt->{$f}));
-    }
+  {
+    my @COPYVARS = qw/
+                        tmpdir
+                        ami_id
+                        hostname
+                        instance_type
+                        security_group
+                        sec_fencer_build
+                        region
+                        zone
+                        root-disk-size
+                        ebs-optimized
+                      /;
+
+    foreach my $f (@COPYVARS) { $config->{$f} = $opt->{$f} if (!Helpers::Misc::isEmpty($opt->{$f})); }
+  }
+
+  print STDERR "config->{'instnace_type'} = " . $config->{'instance_type'} . "\n";
 
   Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MISSING_AMI_ID)         if (!Helpers::AWS::isValidAMI($config->{'ami_id'}));
   Helpers::Misc::display_and_exit(EXIT_FAILURE, ERR_MISSING_SEC_GROUP)      if (!Helpers::AWS::isValidSecurityGroup($opt->{'security_group'}));
@@ -213,7 +229,7 @@ our $cleanup_obj  =  { files => [], directories => [] };
   $cmd .= qq( --count 1);
   $cmd .= qq( --region ) . $config->{'region'};
   $cmd .= qq( --security-group-ids ) . $config->{'security_group'};
-  $cmd .= qq( --ebs-optimized);
+  $cmd .= qq( --ebs-optimized) if ($config->{'ebs-optimized'});
   $cmd .= qq( --image-id ) . $config->{'ami_id'};
   $cmd .= qq( --tag-specifications 'ResourceType=instance,Tags=[) . $tags_str . qq(]');
   $cmd .= qq( --instance-type ) . $config->{'instance_type'};
@@ -278,6 +294,8 @@ sub display_help_and_exit
   printf("                                      Default: %s\n", $opt->{'ami_id'});
   printf("      --hostname=<name>               Set instance hostname to <hostname>\n");
   printf("                                      Default: %s\n", $opt->{'hostname'});
+  printf("      --ebs-optimized                 Launch an ebs-optimized instance\n");
+  printf("                                      Default: don't\n");
   printf("      --instance-type=<type>          Launch instance type <type>\n");
   printf("                                      Default: %s\n", $opt->{'instance_type'});
   printf("      --security-group=<group-id>     Launch instance with security group <group-id>\n");
