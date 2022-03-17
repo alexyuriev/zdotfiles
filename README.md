@@ -36,6 +36,7 @@ bake-git-repo                  | Pulls merges some files from multiple repositor
 batcheck                       | Displays the current laptop battery status in X
 gitup                          | syncs up all branches of a repo against remote
 gitprompt                      | Displays git repo name and a current branch. Useful for putting into prompt (PS1) of a shell
+json-builder                   | Takes key => value pairs from a command line outputs a JSON.
 per-type-editor                | Dynamically switches the editor depending on the argument of the file to edit
 evince-mc                      | Evince wrapper that places Evince window into a specific location
 qiv-mc                         | qiv wrapper that places qiv window into a specific location
