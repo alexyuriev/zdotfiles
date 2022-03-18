@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# adds nVidia commerical drivers and 'browser' user to the container
+
+set -e		# abort on error
+
+if [[ "$#" -ne 1 ]]; then
+	echo "container-add-chromium requires container name as a parameter"
+	exit 1
+fi
+
+var_container_name="$1"
+
+if [[ ! -e "${var_container_name}" ]]; then
+	echo "'${var_container_name}' already exists. Use 'build-base-container' first to build it"
+	exit 1
+fi
+
+echo "Adding Chromium and with nvidia commercial driver support to container '${var_container_name}'"
+
+RUN_CHROMIUM_FILE=run-chromium
+NVIDIA_INSTALLER_DIR=NVIDIA-Linux-x86_64-440.44
+NVIDIA_INSTALLER_FILE="${NVIDIA_INSTALLER_DIR}.run"
+
+LBIN_DIR=/usr/local/bin
+ZCONTAINERS_LIBDIR=/usr/local/lib/zcontainers
+
+echo "Ensure that ${ZCONTAINERS_LIBDIR}/${NVIDIA_INSTALLER_FILE} contains nVidia commericial Linux driver..."
+echo " -- Sleeping for 30 seconds. Ctrl-C to abort."
+sleep 30
+
+if [[ ! -e "${ZCONTAINERS_LIBDIR}/${NVIDIA_INSTALLER_FILE}" ]]; then
+	echo "${ZCONTAINERS_LIBDIR}/${NVIDIA_INSTALLER_FILE} is not found."
+	exit 1
+fi
+
+if [[ ! -e "${ZCONTAINERS_LIBDIR}/${RUN_CHROMIUM_FILE}" ]]; then
+	echo "${ZCONTAINERS_LIBDIR}/${RUN_CHROMIUM_FILE} is not found."
+	exit 1
+fi
+
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root apt-get --assume-yes install xauth chromium
+
+cp "${ZCONTAINERS_LIBDIR}/${RUN_CHROMIUM_FILE}" "${var_container_name}/${LBIN_DIR}/${RUN_CHROMIUM_FILE}"
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root chown root.root "${LBIN_DIR}/${RUN_CHROMIUM_FILE}"
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root chmod 555 "${LBIN_DIR}/${RUN_CHROMIUM_FILE}"
+
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root useradd -s /bin/bash --create-home browser
+
+cp "${ZCONTAINERS_LIBDIR}/${NVIDIA_INSTALLER_FILE}" "${var_container_name}/root"
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root chown root.root "/root/${NVIDIA_INSTALLER_FILE}"
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root chmod 555 "/root/${NVIDIA_INSTALLER_FILE}"
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root /root/${NVIDIA_INSTALLER_FILE} --no-nvidia-modprobe --install-libglvnd --no-kernel-module --no-install-compat32-libs --silent
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root rm -rf "/root/${NVIDIA_INSTALLER_FILE}" "/root/${NVIDIA_INSTALLER_DIR}"
