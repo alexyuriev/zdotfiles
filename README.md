@@ -39,8 +39,6 @@ run-chromium         | runs a chromim in a container interfacing via `/etc/conta
 ### Misc useful tools
 
 
-
-
 Tool name                      | Description
 -------------------------------|-----------
 bake-git-repo                  | Pulls merges some files from multiple repositories over a master repo based on a plan
@@ -68,6 +66,7 @@ sre-push-json-to-redis-queue   | Pushes a properly formatted JSON into a Redis q
 sre-fail-if-bad-redis-hash-key | Attempts to fetch a specific field of a redis hash and checks returned value. Exits 0 on a match, 1 on error. Very useful to ensure that redis is in the right state for async tools manipulating it.
 sre-validate-dns-record        | Checks a specific name server response for a specific value
 take_notes                     | A wrapper for taking notes stored in a single text file, entries timestamped. Uses ``joe`` text editor. Use ``take_notes [<beginning of a note>]``
+xauth-to-json                  | gets xauth data from a current session and displays it in a JSON format.
 
 ### AWS manipulation utilities
 
