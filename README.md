@@ -28,7 +28,18 @@ etc/X11/xorg.conf.d/99-no-touchscreen.conf | disables touch screen in X11 etc/pr
 .ackrc                                     | Configuration for ack search tool -- ignore cases
 example-configs/config-wks-redis.json      | Config for accessing a REDIS server for tools that require it
 
+### Container
+
+Tool name            | Description
+---------------------|-------------
+build-base-container | builds a base Debian container using debootstrap
+run-chromium         | runs a chromim in a container interfacing via `/etc/container` configuration passing
+
+
 ### Misc useful tools
+
+
+
 
 Tool name                      | Description
 -------------------------------|-----------

@@ -1,0 +1,54 @@
+#!/bin/bash
+
+cd ${HOME}
+
+XAUTHJSON="/etc/container/xauth.json"
+XAUTHORITY="${HOME}/.Xauthority"
+
+if [[ ! -e "${XAUTHJSON}" ]]; then
+    echo "Cannot open xauth configuration file ${XAUTHJSON}"
+    exit 1
+fi
+
+var_cookie=$(cat ${XAUTHJSON}|jq .cookie|tr -d '"')
+var_cookie_protocol=$(cat ${XAUTHJSON}|jq .cookie_protocol|tr -d '"')
+var_display=$(cat ${XAUTHJSON}|jq .display|tr -d '"')
+
+if [[ -z "${var_cookie}" ]]; then
+    echo "xauth cookie value is not defined."
+    exit 1
+fi
+
+if [[ -z "${var_cookie_protocol}" ]]; then
+    echo "xauth cookie protocol value is not defined."
+    exit 1
+fi
+
+if [[ -z "${var_display}" ]]; then
+    echo "xauth display value is not defined."
+    exit 1
+fi
+
+if [[ -e "${XAUTHORITY}" ]]; then
+    rm -f "${XAUTHORITY}"
+    rc=$?
+    if [[ "${rc}" != "0" ]]; then
+        echo "Failed to remove the current ${XAUTHORITY} file"
+        exit 1
+    fi
+fi
+touch "${XAUTHORITY}"
+rc=$?
+if [[ "${rc}" != "0" ]]; then
+    echo "Failed to create an empty ${XAUTHORITY} file"
+    exit 1
+fi
+
+xauth add "${var_display}" "${var_cookie_protocol}" "${var_cookie}"
+rc=$?
+if [[ "${rc}" != "0" ]]; then
+    echo "Failed to add xauth data to ${XAUTHORITY} file"
+    exit 1
+fi
+
+DISPLAY="${var_display}" XAUTHORITY="${XAUTHORITY}" chromium 2>/dev/null

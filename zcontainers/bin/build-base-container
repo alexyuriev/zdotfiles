@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# builds a basic debian container using debootstrap
+
+set -e      # abort on error
+
+if [[ "$#" -ne 1 ]]; then
+    echo "build-base-container requires container name as a parameter"
+    exit 1
+fi
+
+var_container_name="$1"
+
+if [[ -e "${var_container_name}" ]]; then
+    echo "'${var_container_name}' already exists. Remove it first"
+    exit 1
+fi
+
+# configure the debian version we build
+
+var_debian_version="buster"
+
+echo "Building container '${var_container_name}' running Debian '${var_debian_version}'"
+
+debootstrap "${var_debian_version}" "${var_container_name}"
+echo "${var_container_name}" > "${var_container_name}/etc/hostname"
+
+rm "${var_container_name}/etc/apt/sources.list"
+touch "${var_container_name}/etc/apt/sources.list"
+
+echo "deb http://deb.debian.org/debian ${var_debian_version} main" >> "${var_container_name}/etc/apt/sources.list"
+echo "deb http://deb.debian.org/debian/ ${var_debian_version}-updates main" >> "${var_container_name}/etc/apt/sources.list"
+echo "deb http://security.debian.org/debian-security ${var_debian_version}/updates main" >> "${var_container_name}/etc/apt/sources.list"
+
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root apt-get update
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root apt-get --assume-yes upgrade
+systemd-nspawn -D "${var_container_name}" --as-pid2 -E HOME=/root apt-get --assume-yes install wget curl joe jq git openssh-client
+
+echo "Container '${var_container_name}' running Debian '${var_debian_version}' has been built"
+
+exit 0
