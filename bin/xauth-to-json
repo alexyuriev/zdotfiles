@@ -1,0 +1,28 @@
+#!/bin/bash
+
+cd "${HOME}"
+
+var_display="${DISPLAY}"
+var_protocol="MIT-MAGIC-COOKIE-1"
+var_cookie=$(xauth list | awk '{ print $3 }')
+
+if [[ -z "${var_display}" ]]; then
+    echo "DISPLAY is not set. Is this X environment?"
+    exit 1
+fi
+
+if [[ -z "${var_protocol}" ]]; then
+    echo "xauth cookie protocol is not set. Is this X environment?"
+    exit 1
+fi
+
+if [[ -z "${var_cookie}" ]]; then
+    echo "xauth cookie is not set. Is this X environment?"
+    exit 1
+fi
+
+var_json=$(json-builder "display=${var_display}" "cookie_protocol=${var_protocol}" "cookie=${var_cookie}")
+
+echo $var_json
+
+
